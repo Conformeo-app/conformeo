@@ -41,3 +41,4 @@ Strategie conseillee:
 
 Ce compromis permet de livrer vite sans bloquer le socle offline.
 # conformeo
+# app
