@@ -1,0 +1,38 @@
+{
+  "rules": [
+    {
+      "name": "permis_feu",
+      "keywords": ["permis feu", "meulage", "soudure", "chalumeau"],
+      "actions": [
+        { "type": "ADD_TAG", "value": "permis_feu" },
+        {
+          "type": "SUGGEST",
+          "value": "Créer un permis de feu pour cette intervention"
+        },
+        {
+          "type": "ADD_REMINDER",
+          "value": "Vérifier extincteur et balisage avant démarrage"
+        }
+      ]
+    },
+    {
+      "name": "epi",
+      "keywords": ["epi", "casque", "harnais", "gants", "lunettes"],
+      "actions": [
+        { "type": "ADD_TAG", "value": "safety" },
+        { "type": "SUGGEST", "value": "Contrôler le port des EPI obligatoires" }
+      ]
+    },
+    {
+      "name": "dechets",
+      "keywords": ["dechet", "dechets", "benne", "gravats"],
+      "actions": [
+        { "type": "ADD_TAG", "value": "waste_related" },
+        {
+          "type": "SUGGEST",
+          "value": "Tracer la filière de déchets dans le rapport chantier"
+        }
+      ]
+    }
+  ]
+}
