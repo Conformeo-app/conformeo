@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import { ModuleKey, modules } from '../../core/modules';
 import { SyncStatus } from '../../data/sync/runtime';
 import { useTheme } from '../theme/ThemeProvider';
@@ -19,13 +19,71 @@ export function Sidebar({
 }) {
   const { colors, spacing, radii } = useTheme();
 
+  if (compact) {
+    return (
+      <View
+        style={{
+          padding: spacing.md,
+          backgroundColor: colors.white,
+          borderBottomWidth: 1,
+          borderColor: colors.fog,
+          gap: spacing.sm
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text variant="h2">Conformeo</Text>
+          <Text variant="caption" style={{ color: colors.slate }}>
+            Mobile
+          </Text>
+        </View>
+
+        <SyncPill
+          phase={syncStatus.phase}
+          queueDepth={syncStatus.queueDepth}
+          deadLetterCount={syncStatus.deadLetterCount}
+          lastError={syncStatus.lastError}
+          lastSyncedAt={syncStatus.lastSyncedAt}
+          lastResult={syncStatus.lastResult}
+        />
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ gap: spacing.sm, paddingRight: spacing.md }}
+        >
+          {modules.map((m) => {
+            const isActive = m.key === active;
+            return (
+              <Pressable
+                key={m.key}
+                onPress={() => onSelect(m.key)}
+                style={{
+                  paddingVertical: spacing.sm,
+                  paddingHorizontal: spacing.md,
+                  borderRadius: radii.pill,
+                  borderWidth: 1,
+                  borderColor: isActive ? colors.teal : colors.fog,
+                  backgroundColor: isActive ? colors.mint : colors.white,
+                  minWidth: 108
+                }}
+              >
+                <Text variant="bodyStrong" style={{ color: isActive ? colors.ink : colors.slate }}>
+                  {m.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  }
+
   return (
     <View
       style={{
         padding: spacing.lg,
         backgroundColor: colors.white,
-        borderRightWidth: compact ? 0 : 1,
-        borderBottomWidth: compact ? 1 : 0,
+        borderRightWidth: 1,
         borderColor: colors.fog
       }}
     >

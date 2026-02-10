@@ -4,7 +4,5 @@ import { useTheme } from '../theme/ThemeProvider';
 
 export function Screen({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
   const { spacing } = useTheme();
-  return (
-    <View style={[{ padding: spacing.lg, flex: 1 }, style]}>{children}</View>
-  );
+  return <View style={[{ padding: spacing.lg, flex: 1, minHeight: 0 }, style]}>{children}</View>;
 }

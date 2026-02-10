@@ -6,6 +6,8 @@ import { ModuleKey } from './core/modules';
 import { useSyncStatus } from './data/sync/useSyncStatus';
 import { AuthAccessScreen } from './features/auth/AuthAccessScreen';
 import { DashboardScreen } from './features/dashboard/DashboardScreen';
+import { DocumentsScreen } from './features/documents/DocumentsScreen';
+import { ExportsScreen } from './features/exports/ExportsScreen';
 import { MediaScreen } from './features/media/MediaScreen';
 import { OfflineScreen } from './features/offline/OfflineScreen';
 import { PlansScreen } from './features/plans/PlansScreen';
@@ -22,6 +24,8 @@ const MIN_WIDE_LAYOUT_WIDTH = 1024;
 const moduleToScreen: Record<ModuleKey, React.ComponentType> = {
   dashboard: DashboardScreen,
   tasks: TasksScreen,
+  documents: DocumentsScreen,
+  exports: ExportsScreen,
   search: SearchScreen,
   offline: OfflineScreen,
   media: MediaScreen,

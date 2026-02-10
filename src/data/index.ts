@@ -33,3 +33,5 @@ export * from './sync/useSyncStatus';
 export * from './sync/sync-engine';
 export * from './media';
 export * from './tasks';
+export * from './documents';
+export * from './exports';
