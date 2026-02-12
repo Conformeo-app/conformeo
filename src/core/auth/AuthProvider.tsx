@@ -1,7 +1,20 @@
 import type { Session, User } from '@supabase/supabase-js';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  AppRole,
+  MfaEnrollment,
+  SessionAuditEntry,
+  UserProfile,
+  auth as securityAuth,
+  identity,
+  mfa,
+  rbac,
+  sessions
+} from '../identity-security';
+import { mapMemberRoleToAppRole, resolveMembership, toErrorMessage } from '../identity-security/utils';
 import { appEnv } from '../env';
 import { getSupabaseClient } from '../supabase/client';
+import { flags } from '../../data/feature-flags';
 
 type AuthContextValue = {
   isConfigured: boolean;
@@ -10,98 +23,210 @@ type AuthContextValue = {
   user: User | null;
   activeOrgId: string | null;
   hasMembership: boolean | null;
+  role: AppRole | null;
+  permissions: string[];
+  profile: UserProfile | null;
+  requiresMfaEnrollment: boolean;
+  pendingMfaEnrollment: MfaEnrollment | null;
   signInWithPassword: (input: { email: string; password: string }) => Promise<void>;
+  signInWithMagicLink: (email: string) => Promise<void>;
   signUpWithPassword: (
     input: { email: string; password: string }
   ) => Promise<{ needsEmailConfirmation: boolean }>;
   signOut: () => Promise<void>;
+  refreshSession: () => Promise<Session | null>;
   bootstrapOrganization: (orgName: string) => Promise<void>;
   refreshMembership: () => Promise<void>;
+  refreshAuthorization: () => Promise<void>;
+  enrollAdminMfa: () => Promise<MfaEnrollment>;
+  verifyAdminMfa: (code: string) => Promise<void>;
+  disableMfa: () => Promise<void>;
+  listSessions: () => Promise<SessionAuditEntry[]>;
+  revokeSession: (sessionId: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-async function ensureProfile(user: User) {
-  const client = getSupabaseClient();
-  if (!client) {
-    return;
-  }
-
-  const fallbackDisplayName = user.email?.split('@')[0] ?? 'Utilisateur';
-  const displayName =
-    typeof user.user_metadata?.full_name === 'string'
-      ? user.user_metadata.full_name
-      : fallbackDisplayName;
-
-  const { error } = await client
-    .from('profiles')
-    .upsert({ user_id: user.id, display_name: displayName }, { onConflict: 'user_id' });
-
-  if (error && __DEV__) {
-    console.warn('Unable to upsert profile:', error.message);
-  }
-}
-
-async function resolveMembership(userId: string) {
-  const client = getSupabaseClient();
-  if (!client) {
-    return { activeOrgId: null, hasMembership: null as boolean | null };
-  }
-
-  const { data, error } = await client
-    .from('org_members')
-    .select('org_id')
-    .eq('user_id', userId)
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    if (__DEV__) {
-      console.warn('Unable to resolve membership:', error.message);
-    }
-    return { activeOrgId: null, hasMembership: false };
-  }
-
-  return {
-    activeOrgId: data?.org_id ?? null,
-    hasMembership: Boolean(data?.org_id)
-  };
-}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [hasMembership, setHasMembership] = useState<boolean | null>(null);
+  const [memberRole, setMemberRole] = useState<string | null>(null);
+  const [role, setRole] = useState<AppRole | null>(null);
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [requiresMfaEnrollment, setRequiresMfaEnrollment] = useState(false);
+  const [pendingMfaEnrollment, setPendingMfaEnrollment] = useState<MfaEnrollment | null>(null);
 
-  const syncFromSession = useCallback(async (nextSession: Session | null) => {
-    setSession(nextSession);
-
-    if (!nextSession?.user) {
-      setActiveOrgId(null);
-      setHasMembership(false);
-      setLoading(false);
-      return;
-    }
-
-    await ensureProfile(nextSession.user);
-    const membership = await resolveMembership(nextSession.user.id);
-    setActiveOrgId(membership.activeOrgId);
-    setHasMembership(membership.hasMembership);
-    setLoading(false);
+  const resetSecurityState = useCallback(() => {
+    rbac.clearCache();
+    flags.setContext({ org_id: undefined, user_id: undefined });
+    setRole(null);
+    setPermissions([]);
+    setProfile(null);
+    setRequiresMfaEnrollment(false);
+    setPendingMfaEnrollment(null);
   }, []);
+
+  const refreshAuthorizationForMembership = useCallback(
+    async (input: { user: User; orgId: string; memberRole: string | null }) => {
+      const fallbackRole = mapMemberRoleToAppRole(input.memberRole);
+
+      const nextProfile = await identity.ensureProfileForOrg({
+        user: input.user,
+        orgId: input.orgId,
+        role: fallbackRole
+      });
+
+      setProfile(nextProfile);
+
+      const nextRole = nextProfile.role ?? fallbackRole;
+      setRole(nextRole);
+
+      rbac.clearCache();
+      const nextPermissions = await rbac.listPermissions({ orgId: input.orgId });
+      setPermissions(nextPermissions);
+
+      if (nextRole === 'ADMIN') {
+        const hasVerifiedTotp = await mfa.hasVerifiedTotp();
+        setRequiresMfaEnrollment(!hasVerifiedTotp);
+      } else {
+        setRequiresMfaEnrollment(false);
+      }
+
+      await sessions.touchCurrent();
+    },
+    []
+  );
+
+  const syncFromSession = useCallback(
+    async (nextSession: Session | null) => {
+      setSession(nextSession);
+
+      if (!nextSession?.user) {
+        setActiveOrgId(null);
+        setHasMembership(false);
+        setMemberRole(null);
+        resetSecurityState();
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const client = getSupabaseClient();
+        if (client) {
+          const { error: inviteAcceptError } = await client.rpc('accept_pending_org_invites');
+          const acceptErrorMessage = inviteAcceptError ? toErrorMessage(inviteAcceptError).toLowerCase() : '';
+          if (inviteAcceptError && !acceptErrorMessage.includes('does not exist') && __DEV__) {
+            console.warn('accept_pending_org_invites failed:', toErrorMessage(inviteAcceptError));
+          }
+        }
+
+        const membership = await resolveMembership(nextSession.user.id);
+        setActiveOrgId(membership.orgId);
+        setHasMembership(Boolean(membership.orgId));
+        setMemberRole(membership.memberRole);
+
+        flags.setContext({
+          org_id: membership.orgId ?? undefined,
+          user_id: nextSession.user.id
+        });
+
+        if (membership.orgId) {
+          try {
+            await flags.listAll(membership.orgId);
+          } catch {
+            // Keep defaults when cache is unavailable.
+          }
+
+          void flags.refresh(membership.orgId).catch((flagsError) => {
+            if (__DEV__) {
+              console.warn('feature flags refresh failed:', toErrorMessage(flagsError));
+            }
+          });
+        }
+
+        if (!membership.orgId) {
+          resetSecurityState();
+          setLoading(false);
+          return;
+        }
+
+        await refreshAuthorizationForMembership({
+          user: nextSession.user,
+          orgId: membership.orgId,
+          memberRole: membership.memberRole
+        });
+      } catch (error) {
+        resetSecurityState();
+        if (__DEV__) {
+          console.warn('syncFromSession failed:', toErrorMessage(error));
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [refreshAuthorizationForMembership, resetSecurityState]
+  );
 
   const refreshMembership = useCallback(async () => {
     if (!session?.user) {
       setActiveOrgId(null);
       setHasMembership(false);
+      setMemberRole(null);
+      resetSecurityState();
       return;
     }
 
     const membership = await resolveMembership(session.user.id);
-    setActiveOrgId(membership.activeOrgId);
-    setHasMembership(membership.hasMembership);
-  }, [session]);
+    setActiveOrgId(membership.orgId);
+    setHasMembership(Boolean(membership.orgId));
+    setMemberRole(membership.memberRole);
+
+    flags.setContext({
+      org_id: membership.orgId ?? undefined,
+      user_id: session.user.id
+    });
+
+    if (membership.orgId) {
+      try {
+        await flags.listAll(membership.orgId);
+      } catch {
+        // Keep defaults when cache is unavailable.
+      }
+
+      void flags.refresh(membership.orgId).catch((flagsError) => {
+        if (__DEV__) {
+          console.warn('feature flags refresh failed:', toErrorMessage(flagsError));
+        }
+      });
+    }
+
+    if (!membership.orgId) {
+      resetSecurityState();
+      return;
+    }
+
+    await refreshAuthorizationForMembership({
+      user: session.user,
+      orgId: membership.orgId,
+      memberRole: membership.memberRole
+    });
+  }, [refreshAuthorizationForMembership, resetSecurityState, session]);
+
+  const refreshAuthorization = useCallback(async () => {
+    if (!session?.user || !activeOrgId) {
+      resetSecurityState();
+      return;
+    }
+
+    await refreshAuthorizationForMembership({
+      user: session.user,
+      orgId: activeOrgId,
+      memberRole
+    });
+  }, [activeOrgId, memberRole, refreshAuthorizationForMembership, resetSecurityState, session]);
 
   useEffect(() => {
     const client = getSupabaseClient();
@@ -111,6 +236,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(null);
       setActiveOrgId(null);
       setHasMembership(null);
+      setMemberRole(null);
+      resetSecurityState();
       return;
     }
 
@@ -137,22 +264,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       alive = false;
       data.subscription.unsubscribe();
     };
-  }, [syncFromSession]);
+  }, [resetSecurityState, syncFromSession]);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+
+    let alive = true;
+
+    const tick = async () => {
+      try {
+        await sessions.touchCurrent();
+        const revoked = await sessions.isCurrentRevoked();
+
+        if (revoked && alive) {
+          await securityAuth.signOut();
+        }
+      } catch (error) {
+        if (__DEV__) {
+          console.warn('session heartbeat failed:', toErrorMessage(error));
+        }
+      }
+    };
+
+    void tick();
+    const intervalId = setInterval(() => {
+      void tick();
+    }, 45_000);
+
+    return () => {
+      alive = false;
+      clearInterval(intervalId);
+    };
+  }, [session]);
 
   const signInWithPassword = useCallback(async (input: { email: string; password: string }) => {
-    const client = getSupabaseClient();
-    if (!client) {
-      throw new Error('Supabase non configure.');
-    }
+    await securityAuth.signIn(input.email, input.password);
+  }, []);
 
-    const { error } = await client.auth.signInWithPassword({
-      email: input.email.trim(),
-      password: input.password
-    });
-
-    if (error) {
-      throw new Error(error.message);
-    }
+  const signInWithMagicLink = useCallback(async (email: string) => {
+    await securityAuth.signInWithMagicLink(email);
   }, []);
 
   const signUpWithPassword = useCallback(
@@ -171,23 +323,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(error.message);
       }
 
-      // If email confirmation is enabled, Supabase returns no session yet.
       return { needsEmailConfirmation: !data.session };
     },
     []
   );
 
   const signOut = useCallback(async () => {
-    const client = getSupabaseClient();
-    if (!client) {
-      return;
-    }
-
-    const { error } = await client.auth.signOut();
-    if (error) {
-      throw new Error(error.message);
-    }
+    await securityAuth.signOut();
+    setPendingMfaEnrollment(null);
   }, []);
+
+  const refreshSession = useCallback(async () => {
+    const nextSession = await securityAuth.refreshSession();
+    await syncFromSession(nextSession);
+    return nextSession;
+  }, [syncFromSession]);
 
   const bootstrapOrganization = useCallback(
     async (orgName: string) => {
@@ -201,7 +351,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const cleanName = orgName.trim();
       if (cleanName.length < 2) {
-        throw new Error('Nom d\'organisation trop court.');
+        throw new Error("Nom d'organisation trop court.");
       }
 
       const { data: orgId, error: bootstrapError } = await client.rpc('bootstrap_organization', {
@@ -221,6 +371,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [refreshMembership, session]
   );
 
+  const enrollAdminMfa = useCallback(async () => {
+    const enrollment = await mfa.enrollTOTP();
+    setPendingMfaEnrollment(enrollment);
+    return enrollment;
+  }, []);
+
+  const verifyAdminMfa = useCallback(
+    async (code: string) => {
+      await mfa.verify(code);
+      setPendingMfaEnrollment(null);
+      await refreshAuthorization();
+    },
+    [refreshAuthorization]
+  );
+
+  const disableMfa = useCallback(async () => {
+    await mfa.disable();
+    setPendingMfaEnrollment(null);
+    await refreshAuthorization();
+  }, [refreshAuthorization]);
+
+  const listSessions = useCallback(async () => {
+    return sessions.list();
+  }, []);
+
+  const revokeSession = useCallback(
+    async (sessionId: string) => {
+      await sessions.revoke(sessionId);
+      const currentSessionId = await sessions.getCurrentSessionId();
+      if (currentSessionId && currentSessionId === sessionId) {
+        await signOut();
+      }
+    },
+    [signOut]
+  );
+
   const value = useMemo<AuthContextValue>(
     () => ({
       isConfigured: appEnv.isSupabaseConfigured,
@@ -229,22 +415,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user: session?.user ?? null,
       activeOrgId,
       hasMembership,
+      role,
+      permissions,
+      profile,
+      requiresMfaEnrollment,
+      pendingMfaEnrollment,
       signInWithPassword,
+      signInWithMagicLink,
       signUpWithPassword,
       signOut,
+      refreshSession,
       bootstrapOrganization,
-      refreshMembership
+      refreshMembership,
+      refreshAuthorization,
+      enrollAdminMfa,
+      verifyAdminMfa,
+      disableMfa,
+      listSessions,
+      revokeSession
     }),
     [
       activeOrgId,
       bootstrapOrganization,
+      disableMfa,
+      enrollAdminMfa,
       hasMembership,
+      listSessions,
       loading,
+      pendingMfaEnrollment,
+      permissions,
+      profile,
+      refreshAuthorization,
       refreshMembership,
+      refreshSession,
+      requiresMfaEnrollment,
+      revokeSession,
+      role,
       session,
+      signInWithMagicLink,
       signInWithPassword,
       signOut,
-      signUpWithPassword
+      signUpWithPassword,
+      verifyAdminMfa
     ]
   );
 

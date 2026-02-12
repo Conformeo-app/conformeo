@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { useAuth } from '../../core/auth';
 import { offlineDB } from '../../data/offline/outbox';
 import { useSyncStatus } from '../../data/sync/useSyncStatus';
@@ -45,51 +45,57 @@ export function OfflineScreen() {
 
   return (
     <Screen>
-      <SectionHeader
-        title="Offline-first"
-        subtitle="Base locale prioritaire, synchronisation asynchrone et resiliente."
-      />
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: spacing.lg }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <SectionHeader
+          title="Offline-first"
+          subtitle="Base locale prioritaire, synchronisation asynchrone et resiliente."
+        />
 
-      <View style={{ gap: spacing.md }}>
-        <Card>
-          <Text variant="h2">Etat de synchronisation</Text>
-          <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
-            {toStatusLabel(status.phase)}
-          </Text>
-          <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
-            Operations en attente: {status.queueDepth}
-          </Text>
-          <Text
-            variant="body"
-            style={{ color: status.deadLetterCount > 0 ? colors.rose : colors.slate, marginTop: spacing.xs }}
-          >
-            Operations en echec terminal: {status.deadLetterCount}
-          </Text>
-          {status.lastResult ? (
-            <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
-              Dernier cycle - push:{status.lastResult.pushed}, retry:{status.lastResult.failed}, dead:
-              {status.lastResult.dead}
+        <View style={{ gap: spacing.md }}>
+          <Card>
+            <Text variant="h2">Etat de synchronisation</Text>
+            <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              {toStatusLabel(status.phase)}
             </Text>
-          ) : null}
-          {status.lastSyncedAt ? (
-            <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
-              Derniere sync: {new Date(status.lastSyncedAt).toLocaleTimeString()}
+            <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Operations en attente: {status.queueDepth}
             </Text>
-          ) : null}
-          {status.lastError ? (
-            <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.xs }}>
-              {status.lastError}
+            <Text
+              variant="body"
+              style={{ color: status.deadLetterCount > 0 ? colors.rose : colors.slate, marginTop: spacing.xs }}
+            >
+              Operations en echec terminal: {status.deadLetterCount}
             </Text>
-          ) : null}
-        </Card>
+            {status.lastResult ? (
+              <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
+                Dernier cycle - push:{status.lastResult.pushed}, retry:{status.lastResult.failed}, dead:
+                {status.lastResult.dead}
+              </Text>
+            ) : null}
+            {status.lastSyncedAt ? (
+              <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
+                Derniere sync: {new Date(status.lastSyncedAt).toLocaleTimeString()}
+              </Text>
+            ) : null}
+            {status.lastError ? (
+              <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.xs }}>
+                {status.lastError}
+              </Text>
+            ) : null}
+          </Card>
 
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-          <Button label="Rafraichir" onPress={() => void refreshQueue()} />
-          <Button label="Ajouter operation demo" kind="ghost" onPress={() => void enqueueDemo()} />
-          <Button label="Synchroniser" onPress={() => void syncNow()} />
-          <Button label="Rejouer erreurs" kind="ghost" onPress={() => void replayDeadLetters()} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+            <Button label="Rafraichir" onPress={() => void refreshQueue()} />
+            <Button label="Ajouter operation demo" kind="ghost" onPress={() => void enqueueDemo()} />
+            <Button label="Synchroniser" onPress={() => void syncNow()} />
+            <Button label="Rejouer erreurs" kind="ghost" onPress={() => void replayDeadLetters()} />
+          </View>
         </View>
-      </View>
+      </ScrollView>
     </Screen>
   );
 }

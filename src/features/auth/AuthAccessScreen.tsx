@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, TextInput, View } from 'react-native';
+import { ActivityIndicator, ScrollView, TextInput, View } from 'react-native';
 import { useAuth } from '../../core/auth';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
@@ -105,12 +105,18 @@ export function AuthAccessScreen() {
   if (!isConfigured) {
     return (
       <Screen>
-        <Card>
-          <Text variant="h2">Supabase non configure</Text>
-          <Text variant="body" style={{ color: colors.slate, marginTop: spacing.sm }}>
-            Renseigne EXPO_PUBLIC_SUPABASE_URL et EXPO_PUBLIC_SUPABASE_ANON_KEY dans le fichier .env.
-          </Text>
-        </Card>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: spacing.lg }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Card>
+            <Text variant="h2">Supabase non configure</Text>
+            <Text variant="body" style={{ color: colors.slate, marginTop: spacing.sm }}>
+              Renseigne EXPO_PUBLIC_SUPABASE_URL et EXPO_PUBLIC_SUPABASE_ANON_KEY dans le fichier .env.
+            </Text>
+          </Card>
+        </ScrollView>
       </Screen>
     );
   }
@@ -129,60 +135,66 @@ export function AuthAccessScreen() {
   if (!session) {
     return (
       <Screen>
-        <Card>
-          <Text variant="h2">Connexion / Inscription</Text>
-          <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
-            Email + mot de passe Supabase.
-          </Text>
-
-          <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
-            <TextInput
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              placeholder="email"
-              placeholderTextColor={colors.slate}
-              style={inputStyle}
-            />
-            <TextInput
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder="mot de passe"
-              placeholderTextColor={colors.slate}
-              style={inputStyle}
-            />
-          </View>
-
-          {error ? (
-            <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
-              {error}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: spacing.lg }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Card>
+            <Text variant="h2">Connexion / Inscription</Text>
+            <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Email + mot de passe Supabase.
             </Text>
-          ) : null}
-          {info ? (
-            <Text variant="caption" style={{ color: colors.tealDark, marginTop: spacing.sm }}>
-              {info}
-            </Text>
-          ) : null}
 
-          <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md }}>
-            <Button
-              label={submitting ? 'Connexion...' : 'Se connecter'}
-              onPress={handleSignIn}
-              disabled={!canSubmitSignIn}
-            />
-            <Button
-              label={submitting ? 'Creation...' : 'Creer un compte'}
-              kind="ghost"
-              onPress={handleSignUp}
-              disabled={!canSubmitSignIn}
-            />
-          </View>
-        </Card>
+            <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
+              <TextInput
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                placeholder="email"
+                placeholderTextColor={colors.slate}
+                style={inputStyle}
+              />
+              <TextInput
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="mot de passe"
+                placeholderTextColor={colors.slate}
+                style={inputStyle}
+              />
+            </View>
+
+            {error ? (
+              <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
+                {error}
+              </Text>
+            ) : null}
+            {info ? (
+              <Text variant="caption" style={{ color: colors.tealDark, marginTop: spacing.sm }}>
+                {info}
+              </Text>
+            ) : null}
+
+            <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md }}>
+              <Button
+                label={submitting ? 'Connexion...' : 'Se connecter'}
+                onPress={handleSignIn}
+                disabled={!canSubmitSignIn}
+              />
+              <Button
+                label={submitting ? 'Creation...' : 'Creer un compte'}
+                kind="ghost"
+                onPress={handleSignUp}
+                disabled={!canSubmitSignIn}
+              />
+            </View>
+          </Card>
+        </ScrollView>
       </Screen>
     );
   }
@@ -190,47 +202,53 @@ export function AuthAccessScreen() {
   if (hasMembership === false) {
     return (
       <Screen>
-        <Card>
-          <Text variant="h2">Initialiser l'organisation</Text>
-          <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
-            Compte connecte: {user?.email ?? 'utilisateur'}
-          </Text>
-          <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
-            Aucun acces org detecte. Cree ta premiere organisation.
-          </Text>
-
-          <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
-            <TextInput
-              value={orgName}
-              onChangeText={setOrgName}
-              autoCapitalize="words"
-              autoCorrect={false}
-              placeholder="Nom organisation"
-              placeholderTextColor={colors.slate}
-              style={inputStyle}
-            />
-          </View>
-
-          {error ? (
-            <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
-              {error}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: spacing.lg }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Card>
+            <Text variant="h2">Initialiser l'organisation</Text>
+            <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Compte connecte: {user?.email ?? 'utilisateur'}
             </Text>
-          ) : null}
-          {info ? (
-            <Text variant="caption" style={{ color: colors.tealDark, marginTop: spacing.sm }}>
-              {info}
+            <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Aucun acces org detecte. Cree ta premiere organisation.
             </Text>
-          ) : null}
 
-          <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md }}>
-            <Button
-              label={submitting ? 'Creation...' : "Creer l'organisation"}
-              onPress={handleBootstrapOrg}
-              disabled={!canSubmitOrg}
-            />
-            <Button label="Se deconnecter" kind="ghost" onPress={() => void signOut()} disabled={submitting} />
-          </View>
-        </Card>
+            <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
+              <TextInput
+                value={orgName}
+                onChangeText={setOrgName}
+                autoCapitalize="words"
+                autoCorrect={false}
+                placeholder="Nom organisation"
+                placeholderTextColor={colors.slate}
+                style={inputStyle}
+              />
+            </View>
+
+            {error ? (
+              <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
+                {error}
+              </Text>
+            ) : null}
+            {info ? (
+              <Text variant="caption" style={{ color: colors.tealDark, marginTop: spacing.sm }}>
+                {info}
+              </Text>
+            ) : null}
+
+            <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md }}>
+              <Button
+                label={submitting ? 'Creation...' : "Creer l'organisation"}
+                onPress={handleBootstrapOrg}
+                disabled={!canSubmitOrg}
+              />
+              <Button label="Se deconnecter" kind="ghost" onPress={() => void signOut()} disabled={submitting} />
+            </View>
+          </Card>
+        </ScrollView>
       </Screen>
     );
   }

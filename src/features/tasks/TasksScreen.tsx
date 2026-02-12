@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Image, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useAuth } from '../../core/auth';
 import { MediaAsset } from '../../data/media';
-import { Task, TaskComment, TaskStatus, tasks } from '../../data/tasks';
+import { Task, TaskComment, TaskPriority, TaskStatus, tasks } from '../../data/tasks';
 import { useSyncStatus } from '../../data/sync/useSyncStatus';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
@@ -13,9 +13,10 @@ import { SectionHeader } from '../common/SectionHeader';
 import { useTaskDictation } from './useTaskDictation';
 
 const PAGE_SIZE = 25;
-const DEMO_PROJECT_ID = 'chantier-tasks-demo';
+const DEMO_PROJECT_ID = 'chantier-conformeo-demo';
 
 const STATUS_ORDER: TaskStatus[] = ['TODO', 'DOING', 'DONE', 'BLOCKED'];
+const PRIORITY_ORDER: TaskPriority[] = ['LOW', 'MEDIUM', 'HIGH'];
 
 function statusColor(status: TaskStatus, palette: { teal: string; amber: string; rose: string; mint: string }) {
   if (status === 'TODO') return palette.amber;
@@ -26,6 +27,13 @@ function statusColor(status: TaskStatus, palette: { teal: string; amber: string;
 
 function sanitizeTitle(title: string) {
   return title.trim().replace(/\s+/g, ' ');
+}
+
+function parseTagsInput(input: string) {
+  return input
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0);
 }
 
 function isPdf(mediaAsset: MediaAsset) {
@@ -50,6 +58,7 @@ export function TasksScreen() {
 
   const [descriptionDraft, setDescriptionDraft] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
+  const [tagDraft, setTagDraft] = useState('');
 
   const [loadingList, setLoadingList] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -128,6 +137,7 @@ export function TasksScreen() {
         setDetailMedia(mediaList);
         setDetailComments(comments);
         setDescriptionDraft(task?.description ?? '');
+        setTagDraft(task?.tags.join(', ') ?? '');
       } catch (detailError) {
         const message = detailError instanceof Error ? detailError.message : 'Impossible de charger le détail tâche.';
         setError(message);
@@ -384,12 +394,17 @@ export function TasksScreen() {
 
   return (
     <Screen>
-      <SectionHeader
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: spacing.lg }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <SectionHeader
         title="Tasks Smart"
         subtitle="Création offline ultra-rapide, preuves médias et suggestions mots-clés (v0)."
       />
 
-      <View style={{ flex: 1, gap: spacing.md }}>
+      <View style={{ gap: spacing.md }}>
         <Card>
           <Text variant="h2">Création rapide (3 actions)</Text>
           <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
@@ -499,11 +514,12 @@ export function TasksScreen() {
           </View>
         </Card>
 
-        <View style={{ flex: 1, gap: spacing.md }}>
+        <View style={{ gap: spacing.md }}>
           <FlatList
             data={tasksList}
             keyExtractor={(item) => item.id}
-            style={{ flex: 1 }}
+            scrollEnabled={false}
+            nestedScrollEnabled={false}
             contentContainerStyle={{ gap: spacing.sm, paddingBottom: spacing.md }}
             renderItem={({ item }) => {
               const active = selectedTaskId === item.id;
@@ -577,6 +593,26 @@ export function TasksScreen() {
                   ))}
                 </View>
 
+                <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.sm }}>
+                  Priorite
+                </Text>
+
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs }}>
+                  {PRIORITY_ORDER.map((priority) => (
+                    <Button
+                      key={priority}
+                      label={priority}
+                      kind={selectedTask.priority === priority ? 'primary' : 'ghost'}
+                      onPress={() =>
+                        void updateSelectedTask({
+                          priority
+                        })
+                      }
+                      disabled={submitting || loadingDetail}
+                    />
+                  ))}
+                </View>
+
                 <TextInput
                   value={descriptionDraft}
                   onChangeText={setDescriptionDraft}
@@ -594,6 +630,36 @@ export function TasksScreen() {
                     minHeight: 72
                   }}
                 />
+
+
+                <TextInput
+                  value={tagDraft}
+                  onChangeText={setTagDraft}
+                  placeholder="Tags (csv)"
+                  placeholderTextColor={colors.slate}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: colors.fog,
+                    borderRadius: radii.md,
+                    paddingHorizontal: spacing.md,
+                    paddingVertical: spacing.sm,
+                    backgroundColor: colors.white,
+                    marginTop: spacing.sm
+                  }}
+                />
+
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
+                  <Button
+                    label="Enregistrer tags"
+                    kind="ghost"
+                    onPress={() =>
+                      void updateSelectedTask({
+                        tags: parseTagsInput(tagDraft)
+                      })
+                    }
+                    disabled={submitting || loadingDetail}
+                  />
+                </View>
 
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
                   <Button
@@ -735,6 +801,7 @@ export function TasksScreen() {
           </Text>
         ) : null}
       </View>
+      </ScrollView>
     </Screen>
   );
 }

@@ -361,13 +361,16 @@ async function enqueueJobOperation(job: ExportJob, type: 'CREATE' | 'UPDATE' | '
   });
 }
 
-async function enqueueItemOperation(item: ExportItem) {
+async function enqueueItemOperation(item: ExportItem, orgId: string, projectId: string) {
   await offlineDB.enqueueOperation({
     entity: 'export_items',
     entity_id: item.id,
     type: 'CREATE',
     payload: {
-      ...item
+      ...item,
+      org_id: orgId,
+      orgId,
+      project_id: projectId
     }
   });
 }
@@ -783,7 +786,7 @@ async function resetExportItems(exportId: string) {
   await db.runAsync(`DELETE FROM ${ITEMS_TABLE} WHERE export_id = ?`, exportId);
 }
 
-async function storeExportItems(exportId: string, snapshot: ProjectSnapshot) {
+async function storeExportItems(exportId: string, snapshot: ProjectSnapshot, orgId: string, projectId: string) {
   await resetExportItems(exportId);
 
   const now = nowIso();
@@ -836,7 +839,7 @@ async function storeExportItems(exportId: string, snapshot: ProjectSnapshot) {
       item.created_at
     );
 
-    await enqueueItemOperation(item);
+    await enqueueItemOperation(item, orgId, projectId);
   }
 }
 
@@ -1165,7 +1168,7 @@ export const exportsDoe = {
         throw new Error('Export trop lourd: utiliser export serveur (v1).');
       }
 
-      await storeExportItems(jobId, snapshot);
+      await storeExportItems(jobId, snapshot, runningJob.org_id, runningJob.project_id);
       await clearJobArtifacts(runningJob);
 
       const reportTitle =

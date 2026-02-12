@@ -10,7 +10,7 @@ import { Text } from '../../ui/components/Text';
 import { useTheme } from '../../ui/theme/ThemeProvider';
 import { SectionHeader } from '../common/SectionHeader';
 
-const DEMO_PROJECT_ID = 'chantier-exports-demo';
+const DEMO_PROJECT_ID = 'chantier-conformeo-demo';
 
 const EXPORT_TYPES: Array<{ value: ExportType; label: string; hint: string }> = [
   { value: 'REPORT_PDF', label: 'Rapport chantier', hint: 'PDF synthese + preuves en vignettes' },

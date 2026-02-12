@@ -4,6 +4,7 @@ import { MediaAsset } from './types';
 import { media } from './mediaPipeline';
 
 const STORAGE_BUCKET = 'conformeo-media';
+const UPLOAD_TIMEOUT_MS = 20_000;
 
 function extensionFromMime(mime: MediaAsset['mime']) {
   if (mime === 'image/webp') return 'webp';
@@ -27,15 +28,51 @@ async function loadBlobFromLocalPath(localPath: string) {
   return response.blob();
 }
 
+function withTimeout<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    task.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
+}
+
+function isTerminalUploadError(message: string) {
+  const lowered = message.toLowerCase();
+  return (
+    lowered.includes('bucket not found') ||
+    lowered.includes('not authorized') ||
+    lowered.includes('unauthorized') ||
+    lowered.includes('forbidden') ||
+    lowered.includes('permission') ||
+    lowered.includes('invalid') ||
+    lowered.includes('policy')
+  );
+}
+
 async function uploadSingle(asset: MediaAsset) {
   const client = requireSupabaseClient();
   const remotePath = resolveRemotePath(asset);
   const blob = await loadBlobFromLocalPath(asset.local_path);
 
-  const { error } = await client.storage.from(STORAGE_BUCKET).upload(remotePath, blob, {
-    contentType: asset.mime,
-    upsert: true
-  });
+  const { error } = await withTimeout(
+    client.storage.from(STORAGE_BUCKET).upload(remotePath, blob, {
+      contentType: asset.mime,
+      upsert: true
+    }),
+    UPLOAD_TIMEOUT_MS,
+    'media upload'
+  );
 
   if (error) {
     throw new Error(error.message);
@@ -65,7 +102,10 @@ export const mediaUploadWorker = {
       } catch (error) {
         failed += 1;
         const message = error instanceof Error ? error.message : 'Upload failed';
-        await media.markFailed(asset.id, message);
+        await media.markFailed(asset.id, message, {
+          terminal: isTerminalUploadError(message)
+        });
+        break;
       }
     }
 

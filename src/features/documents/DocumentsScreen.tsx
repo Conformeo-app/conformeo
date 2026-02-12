@@ -20,7 +20,7 @@ import { Screen } from '../../ui/layout/Screen';
 import { useTheme } from '../../ui/theme/ThemeProvider';
 import { SectionHeader } from '../common/SectionHeader';
 
-const DEMO_PROJECT_ID = 'chantier-documents-demo';
+const DEMO_PROJECT_ID = 'chantier-conformeo-demo';
 const PAGE_SIZE = 25;
 
 const SCOPES: DocumentScope[] = ['PROJECT', 'COMPANY'];
@@ -391,12 +391,17 @@ export function DocumentsScreen() {
 
   return (
     <Screen>
-      <SectionHeader
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: spacing.lg }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <SectionHeader
         title="Documents"
         subtitle="Organisation offline-first, versions et liens inter-modules prêts pour DOE/signature."
       />
 
-      <View style={{ flex: 1, gap: spacing.md }}>
+      <View style={{ gap: spacing.md }}>
         <Card>
           <Text variant="h2">Nouveau document</Text>
           <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
@@ -554,10 +559,12 @@ export function DocumentsScreen() {
           </View>
         </Card>
 
-        <View style={{ flex: 1, gap: spacing.md }}>
+        <View style={{ gap: spacing.md }}>
           <FlatList
             data={documentsList}
             keyExtractor={(item) => item.id}
+            scrollEnabled={false}
+            nestedScrollEnabled={false}
             contentContainerStyle={{ gap: spacing.sm, paddingBottom: spacing.md }}
             renderItem={({ item }) => {
               const preview = previews[item.id];
@@ -828,6 +835,7 @@ export function DocumentsScreen() {
           </Text>
         ) : null}
       </View>
+      </ScrollView>
     </Screen>
   );
 }

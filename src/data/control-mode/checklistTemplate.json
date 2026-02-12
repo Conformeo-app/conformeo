@@ -1,0 +1,8 @@
+{
+  "items": [
+    {"key": "epi_ok", "label": "EPI portes et disponibles"},
+    {"key": "zone_rangee", "label": "Zone de travail rangee / securisee"},
+    {"key": "dechets", "label": "Dechets tries / benne identifiee"},
+    {"key": "permis_feu", "label": "Permis feu si intervention a risque"}
+  ]
+}

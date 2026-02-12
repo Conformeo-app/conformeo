@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { ModuleKey, modules } from '../../core/modules';
 import { SyncStatus } from '../../data/sync/runtime';
@@ -10,14 +10,25 @@ export function Sidebar({
   active,
   onSelect,
   compact,
-  syncStatus
+  syncStatus,
+  availableModules
 }: {
   active: ModuleKey;
   onSelect: (key: ModuleKey) => void;
   compact?: boolean;
   syncStatus: SyncStatus;
+  availableModules?: ModuleKey[];
 }) {
   const { colors, spacing, radii } = useTheme();
+
+  const visibleModules = useMemo(() => {
+    if (!availableModules) {
+      return modules;
+    }
+
+    const allowed = new Set<ModuleKey>(availableModules);
+    return modules.filter((item) => allowed.has(item.key));
+  }, [availableModules]);
 
   if (compact) {
     return (
@@ -51,7 +62,7 @@ export function Sidebar({
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ gap: spacing.sm, paddingRight: spacing.md }}
         >
-          {modules.map((m) => {
+          {visibleModules.map((m) => {
             const isActive = m.key === active;
             return (
               <Pressable
@@ -100,7 +111,7 @@ export function Sidebar({
         lastResult={syncStatus.lastResult}
       />
 
-      {modules.map((m) => {
+      {visibleModules.map((m) => {
         const isActive = m.key === active;
         return (
           <Pressable

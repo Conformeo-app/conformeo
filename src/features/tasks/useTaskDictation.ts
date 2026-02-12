@@ -1,8 +1,16 @@
+import { isRunningInExpoGo, requireOptionalNativeModule } from 'expo';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type DictationField = 'title' | 'description' | 'comment';
 
-type SpeechModule = (typeof import('expo-speech-recognition'))['ExpoSpeechRecognitionModule'];
+type SpeechModule = {
+  isRecognitionAvailable: () => boolean;
+  requestPermissionsAsync: () => Promise<{ granted: boolean }>;
+  addListener: (event: string, callback: (event: any) => void) => Listener;
+  start: (options: Record<string, unknown>) => void;
+  stop: () => void;
+  abort: () => void;
+};
 
 type DictationSession = {
   field: DictationField;
@@ -12,13 +20,36 @@ type DictationSession = {
 
 type Listener = { remove: () => void };
 
+function isSpeechModule(value: unknown): value is SpeechModule {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<SpeechModule>;
+  return (
+    typeof candidate.isRecognitionAvailable === 'function' &&
+    typeof candidate.requestPermissionsAsync === 'function' &&
+    typeof candidate.addListener === 'function' &&
+    typeof candidate.start === 'function' &&
+    typeof candidate.stop === 'function' &&
+    typeof candidate.abort === 'function'
+  );
+}
+
 async function loadSpeechModule() {
-  try {
-    const speechLib = await import('expo-speech-recognition');
-    return speechLib.ExpoSpeechRecognitionModule;
-  } catch {
+  if (isRunningInExpoGo()) {
     return null;
   }
+
+  const nativeModule =
+    requireOptionalNativeModule<SpeechModule>('ExpoSpeechRecognition') ??
+    requireOptionalNativeModule<SpeechModule>('ExpoSpeechRecognitionModule');
+
+  if (!isSpeechModule(nativeModule)) {
+    return null;
+  }
+
+  return nativeModule;
 }
 
 function appendText(base: string, chunk: string) {
@@ -81,14 +112,15 @@ export function useTaskDictation() {
       const module = await loadSpeechModule();
       if (!module) {
         setIsAvailable(false);
-        setError('Dictée indisponible sur ce build. Utilise la dictée clavier iOS.');
+        setError('Dictee native indisponible sur ce build (Expo Go). Utilise la dictee clavier iOS ou un dev build.');
         return false;
       }
 
       moduleRef.current = module;
-      setIsAvailable(module.isRecognitionAvailable());
+      const recognitionAvailable = module.isRecognitionAvailable();
+      setIsAvailable(recognitionAvailable);
 
-      if (!module.isRecognitionAvailable()) {
+      if (!recognitionAvailable) {
         setError('Dictée indisponible sur cet appareil. Vérifie Siri/Dictée et permissions.');
         return false;
       }

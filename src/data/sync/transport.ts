@@ -20,6 +20,29 @@ function ensureObject(value: unknown): Record<string, unknown> {
   return {};
 }
 
+const APPLY_OPERATION_TIMEOUT_MS = 15_000;
+let edgeFallbackWarned = false;
+let useRpcOnly = false;
+
+function withTimeout<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    task.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
+}
+
 function resolveOrgId(operation: OfflineOperation) {
   const payload = ensureObject(operation.payload);
   const fromPayload =
@@ -40,9 +63,13 @@ async function invokeEdgeFunction(
   request: ApplyOperationRequest
 ): Promise<ApplyOperationResponse> {
   const client = requireSupabaseClient();
-  const { data, error } = await client.functions.invoke('apply-operation', {
-    body: request
-  });
+  const { data, error } = await withTimeout(
+    client.functions.invoke('apply-operation', {
+      body: request
+    }),
+    APPLY_OPERATION_TIMEOUT_MS,
+    'apply-operation'
+  );
 
   if (error) {
     throw new Error(error.message || 'apply-operation invoke failed');
@@ -71,13 +98,23 @@ async function invokeRpcFallback(
   request: ApplyOperationRequest
 ): Promise<ApplyOperationResponse> {
   const client = requireSupabaseClient();
-  const { data, error } = await client.rpc('apply_sync_operation', {
-    p_operation_id: request.operation_id,
-    p_entity: request.entity,
-    p_action:
-      request.type === 'CREATE' ? 'insert' : request.type === 'UPDATE' ? 'update' : 'delete',
-    p_payload: request.payload
-  });
+  const rpcPromise = Promise.resolve(
+    client.rpc('apply_sync_operation', {
+      p_operation_id: request.operation_id,
+      p_entity: request.entity,
+      p_action:
+        request.type === 'CREATE' ? 'insert' : request.type === 'UPDATE' ? 'update' : 'delete',
+      p_payload: request.payload
+    })
+  );
+
+  const rpcResult = (await withTimeout(
+    rpcPromise,
+    APPLY_OPERATION_TIMEOUT_MS,
+    'apply_sync_operation'
+  )) as { data: unknown; error: { message: string } | null };
+
+  const { data, error } = rpcResult;
 
   if (error) {
     return { status: 'REJECTED', reason: error.message };
@@ -132,11 +169,18 @@ function createSupabaseTransport(): SyncTransport {
         }
       };
 
+      if (useRpcOnly) {
+        return invokeRpcFallback(request);
+      }
+
       try {
         return await invokeEdgeFunction(request);
       } catch (error) {
-        if (__DEV__) {
-          console.warn('[sync-engine] Edge function fallback to RPC:', error);
+        useRpcOnly = true;
+        if (__DEV__ && !edgeFallbackWarned) {
+          edgeFallbackWarned = true;
+          const fallbackMessage = error instanceof Error ? error.message : String(error);
+          console.info('[sync-engine] Edge function indisponible, fallback RPC actif:', fallbackMessage);
         }
         return invokeRpcFallback(request);
       }

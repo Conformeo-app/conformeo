@@ -3,7 +3,8 @@ import { securityPolicies } from '../../core/security/policies';
 import { offlineDB, OfflineOperation } from '../offline/outbox';
 import { mediaUploadWorker } from '../media/uploadWorker';
 import { createSyncTransport } from './transport';
-import { SyncRunResult, SyncTransport } from './types';
+import { ApplyOperationResponse, SyncRunResult, SyncTransport } from './types';
+import { conflicts } from './conflicts';
 
 const BATCH_SIZE = 50;
 const MAX_OPS_PER_CYCLE = 500;
@@ -42,6 +43,71 @@ function isLikelyOfflineError(message: string) {
     lowered.includes('offline') ||
     lowered.includes('timed out') ||
     lowered.includes('failed to fetch')
+  );
+}
+
+function ensurePayloadObject(payload: unknown): Record<string, unknown> {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    return payload as Record<string, unknown>;
+  }
+
+  return {};
+}
+
+function valueAsString(value: unknown) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const cleaned = value.trim();
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+function valueAsNumber(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function resolveOrgIdFromPayload(payload: Record<string, unknown>) {
+  return valueAsString(payload.org_id) ?? valueAsString(payload.orgId);
+}
+
+function resolveActorIdFromPayload(payload: Record<string, unknown>) {
+  return (
+    valueAsString(payload.user_id) ??
+    valueAsString(payload.userId) ??
+    valueAsString(payload.created_by) ??
+    valueAsString(payload.updated_by)
+  );
+}
+
+function resolveLocalVersion(payload: Record<string, unknown>) {
+  return (
+    valueAsNumber(payload.local_version) ??
+    valueAsNumber(payload.localVersion) ??
+    valueAsNumber(payload.version)
+  );
+}
+
+function isConflictReason(reason: string) {
+  const lowered = reason.toLowerCase();
+  return (
+    lowered.includes('conflict') ||
+    lowered.includes('version') ||
+    lowered.includes('stale') ||
+    lowered.includes('precondition') ||
+    lowered.includes('concurrent') ||
+    lowered.includes('already modified')
   );
 }
 
@@ -205,8 +271,9 @@ class SyncEngine {
     let failed = 0;
     let dead = 0;
     let processed = 0;
+    let shouldStopCycle = false;
 
-    while (processed < MAX_OPS_PER_CYCLE) {
+    while (processed < MAX_OPS_PER_CYCLE && !shouldStopCycle) {
       const batchSize = Math.min(BATCH_SIZE, MAX_OPS_PER_CYCLE - processed);
       const batch = await offlineDB.flushOutbox(batchSize, Date.now());
 
@@ -222,6 +289,9 @@ class SyncEngine {
           pushed += 1;
         } else if (outcome === 'FAILED') {
           failed += 1;
+          // Fail-fast on transient failures to avoid a long "syncing" lock.
+          shouldStopCycle = true;
+          break;
         } else {
           dead += 1;
         }
@@ -263,11 +333,31 @@ class SyncEngine {
         return 'PUSHED';
       }
 
-      await this.markFailed(operation.id, response.reason ?? 'Operation rejected by server', {
+      const reason = response.reason ?? 'Operation rejected by server';
+
+      if (response.status === 'REJECTED') {
+        const conflictOutcome = await this.handleConflictReject(operation, response, reason);
+        if (conflictOutcome) {
+          return conflictOutcome;
+        }
+      }
+
+      const terminal = this.isTerminalRejectReason(reason);
+
+      await this.markFailed(operation.id, reason, {
         retryCount: operation.retry_count,
-        terminal: true
+        terminal
       });
-      return 'DEAD';
+
+      if (terminal) {
+        return 'DEAD';
+      }
+
+      if (operation.retry_count + 1 >= securityPolicies.maxSyncAttempts) {
+        return 'DEAD';
+      }
+
+      return 'FAILED';
     } catch (error) {
       const reason = toErrorMessage(error);
       await this.markFailed(operation.id, reason, {
@@ -281,6 +371,93 @@ class SyncEngine {
 
       return 'FAILED';
     }
+  }
+
+  private async handleConflictReject(
+    operation: OfflineOperation,
+    response: ApplyOperationResponse,
+    reason: string
+  ): Promise<'FAILED' | 'DEAD' | null> {
+    if (!this.isConflictReject(operation, response, reason)) {
+      return null;
+    }
+
+    const payload = ensurePayloadObject(operation.payload);
+    const orgId = resolveOrgIdFromPayload(payload);
+
+    if (!orgId) {
+      return null;
+    }
+
+    const actorId = resolveActorIdFromPayload(payload);
+
+    conflicts.setContext({
+      org_id: orgId,
+      user_id: actorId ?? undefined
+    });
+
+    const policy = await conflicts.getPolicy(operation.entity, orgId);
+
+    const conflict = await conflicts.record({
+      org_id: orgId,
+      entity: operation.entity,
+      entity_id: operation.entity_id,
+      operation_id: operation.id,
+      operation_type: operation.type,
+      local_payload: payload,
+      server_payload: {
+        status: response.status,
+        reason,
+        server_version: response.server_version,
+        server_updated_at: response.server_updated_at
+      },
+      policy,
+      reason
+    });
+
+    if (policy === 'SERVER_WINS') {
+      await conflicts.autoResolve(conflict.id, 'KEEP_SERVER');
+      await this.markFailed(operation.id, `Conflict server-wins: ${reason}`, {
+        retryCount: operation.retry_count,
+        terminal: true
+      });
+      return 'DEAD';
+    }
+
+    if (policy === 'LWW') {
+      await conflicts.autoResolve(conflict.id, 'KEEP_LOCAL');
+      await this.markFailed(operation.id, `Conflict lww retry: ${reason}`, {
+        retryCount: operation.retry_count,
+        terminal: false
+      });
+
+      if (operation.retry_count + 1 >= securityPolicies.maxSyncAttempts) {
+        return 'DEAD';
+      }
+
+      return 'FAILED';
+    }
+
+    await this.markFailed(operation.id, `Conflict manual required: ${reason}`, {
+      retryCount: operation.retry_count,
+      terminal: true
+    });
+    return 'DEAD';
+  }
+
+  private isConflictReject(operation: OfflineOperation, response: ApplyOperationResponse, reason: string) {
+    if (isConflictReason(reason)) {
+      return true;
+    }
+
+    const payload = ensurePayloadObject(operation.payload);
+    const localVersion = resolveLocalVersion(payload);
+
+    if (localVersion === null || typeof response.server_version !== 'number') {
+      return false;
+    }
+
+    return response.server_version !== localVersion;
   }
 
   async markSynced(operationId: string) {
@@ -314,6 +491,26 @@ class SyncEngine {
     const maxMs = 5 * 60_000;
     const multiplier = 2 ** Math.max(0, retryCount - 1);
     return Math.min(maxMs, baseMs * multiplier);
+  }
+
+  private isTerminalRejectReason(reason: string) {
+    const lowered = reason.toLowerCase();
+
+    return (
+      lowered.includes('forbidden') ||
+      lowered.includes('not authenticated') ||
+      lowered.includes('unauthorized') ||
+      lowered.includes('permission') ||
+      lowered.includes('policy') ||
+      lowered.includes('invalid') ||
+      lowered.includes('required') ||
+      lowered.includes('violates') ||
+      lowered.includes('mismatch') ||
+      lowered.includes('does not exist') ||
+      lowered.includes('not found') ||
+      lowered.includes('undefined function') ||
+      lowered.includes('schema cache')
+    );
   }
 
   private async initialize() {

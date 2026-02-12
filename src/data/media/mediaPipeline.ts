@@ -4,6 +4,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as SQLite from 'expo-sqlite';
 import { Image } from 'react-native';
+import { securityPolicies } from '../../core/security/policies';
 import { MediaAsset, MediaContext, MediaListFilters, MediaMime, MediaProcessConfig } from './types';
 
 const DB_NAME = 'conformeo.db';
@@ -182,6 +183,19 @@ async function ensureDirectories() {
   }
 }
 
+async function recoverInterruptedUploads() {
+  const db = await getDb();
+  await db.runAsync(
+    `
+      UPDATE ${TABLE_NAME}
+      SET upload_status = 'FAILED',
+          last_error = COALESCE(last_error, 'Upload interrompu: reprise au prochain cycle.'),
+          retry_count = retry_count + 1
+      WHERE upload_status = 'UPLOADING'
+    `
+  );
+}
+
 async function setupSchema() {
   const db = await getDb();
 
@@ -231,6 +245,7 @@ async function ensureSetup() {
     setupPromise = (async () => {
       await ensureDirectories();
       await setupSchema();
+      await recoverInterruptedUploads();
       void cleanupOrphanedThumbs();
       void cleanupOldExports();
     })();
@@ -749,11 +764,15 @@ export const media = {
       `
         SELECT *
         FROM ${TABLE_NAME}
-        WHERE upload_status IN ('PENDING', 'FAILED')
-          AND watermark_applied = 1
+        WHERE watermark_applied = 1
+          AND (
+            upload_status = 'PENDING'
+            OR (upload_status = 'FAILED' AND retry_count < ?)
+          )
         ORDER BY created_at ASC
         LIMIT ?
       `,
+      securityPolicies.maxSyncAttempts,
       Math.max(1, limit)
     );
 
@@ -776,15 +795,19 @@ export const media = {
     });
   },
 
-  async markFailed(id: string, error: string) {
+  async markFailed(id: string, error: string, options: { terminal?: boolean } = {}) {
     const asset = await getByIdInternal(id);
     if (!asset) {
       return;
     }
 
+    const nextRetryCount = options.terminal
+      ? securityPolicies.maxSyncAttempts
+      : asset.retry_count + 1;
+
     await updateAsset(id, {
       upload_status: 'FAILED',
-      retry_count: asset.retry_count + 1,
+      retry_count: nextRetryCount,
       last_error: error
     });
   },
@@ -796,8 +819,11 @@ export const media = {
       `
         SELECT COUNT(*) AS count
         FROM ${TABLE_NAME}
-        WHERE upload_status IN ('PENDING', 'UPLOADING', 'FAILED')
-      `
+        WHERE upload_status = 'PENDING'
+           OR upload_status = 'UPLOADING'
+           OR (upload_status = 'FAILED' AND retry_count < ?)
+      `,
+      securityPolicies.maxSyncAttempts
     );
 
     return row?.count ?? 0;

@@ -535,10 +535,12 @@ export const offlineDB = {
         SELECT id, entity, entity_id, type, payload, status, created_at, retry_count, next_attempt_at, last_error, synced_at
         FROM ${OPERATIONS_TABLE}
         WHERE status != 'SYNCED'
+          AND retry_count < ?
           AND next_attempt_at <= ?
         ORDER BY created_at ASC
         LIMIT ?
       `,
+      securityPolicies.maxSyncAttempts,
       now,
       Math.max(1, limit)
     );
@@ -662,7 +664,9 @@ export const offlineDB = {
         SELECT COUNT(*) AS count
         FROM ${OPERATIONS_TABLE}
         WHERE status != 'SYNCED'
-      `
+          AND retry_count < ?
+      `,
+      securityPolicies.maxSyncAttempts
     );
 
     return row?.count ?? 0;
