@@ -1,6 +1,7 @@
 import { createNavigationContainerRef } from '@react-navigation/native';
 import type { RootDrawerParamList } from './types';
 import { getCurrentContext, setCurrentContext, type AppNavigationContext } from './contextStore';
+import { ROUTES } from './routes';
 
 export const navigationRef = createNavigationContainerRef<any>();
 
@@ -9,6 +10,7 @@ type NavigateTarget = keyof RootDrawerParamList | 'ProjectDetail';
 type ProjectDetailParams = {
   projectId: string;
   tab?: 'Overview' | 'Tasks' | 'Plans' | 'Media' | 'Documents' | 'Control';
+  mediaUploadStatus?: 'ALL' | 'PENDING' | 'FAILED';
 };
 
 function ensureReady() {
@@ -27,19 +29,15 @@ export const navigation = {
         throw new Error('navigation.navigate("ProjectDetail") requiert { projectId }.');
       }
 
-      navigationRef.navigate('Projects', {
+      navigationRef.navigate(ROUTES.PROJECTS, {
         screen: 'ProjectDetail',
         params: {
           projectId: typed.projectId,
-          tab: typed.tab
+          tab: typed.tab,
+          mediaUploadStatus: typed.mediaUploadStatus
         }
       });
 
-      return;
-    }
-
-    if (target === 'Projects') {
-      navigationRef.navigate('Projects', { screen: 'ProjectsList' });
       return;
     }
 

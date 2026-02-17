@@ -24,10 +24,10 @@ export type ModuleKey =
   | 'superadmin';
 
 export const modules: Array<{ key: ModuleKey; label: string; hint: string }> = [
-  { key: 'dashboard', label: 'Dashboard', hint: 'Synthèse terrain' },
+  { key: 'dashboard', label: 'Tableau de bord', hint: 'Synthèse terrain' },
   { key: 'accelerators', label: 'Accélérateurs', hint: 'Quick actions & modèles' },
   { key: 'orgs', label: 'Entreprise', hint: 'Équipe, paramètres, modules' },
-  { key: 'company', label: 'Company Hub', hint: 'Docs internes, certifs, sécurité' },
+  { key: 'company', label: 'Espace entreprise', hint: 'Docs internes, certifs, sécurité' },
   { key: 'tasks', label: 'Tâches', hint: 'Création rapide + preuves' },
   { key: 'equipment', label: 'Équipements', hint: 'Matériel, mouvements, liaisons tâches' },
   { key: 'planning', label: 'Planning', hint: 'Calendrier chantier + affectations' },
@@ -39,12 +39,12 @@ export const modules: Array<{ key: ModuleKey; label: string; hint: string }> = [
   { key: 'control', label: 'Controle', hint: 'Inspection lecture seule' },
   { key: 'search', label: 'Recherche', hint: 'Globale & modules' },
   { key: 'audit', label: 'Audit', hint: 'Traçabilité conformité' },
-  { key: 'offline', label: 'Offline', hint: 'Sync & conflits' },
+  { key: 'offline', label: 'Hors ligne', hint: 'Synchronisation & conflits' },
   { key: 'conflicts', label: 'Conflits', hint: 'Résolution sync' },
   { key: 'media', label: 'Médias', hint: 'Pipeline WebP' },
   { key: 'plans', label: 'Plans', hint: 'Annotations PDF' },
   { key: 'security', label: 'Sécurité', hint: 'RLS & signatures' },
   { key: 'governance', label: 'Gouvernance', hint: 'RGPD, rétention, portabilité' },
   { key: 'backup', label: 'Sauvegarde', hint: 'Export / import local' },
-  { key: 'superadmin', label: 'Super Admin', hint: 'Console support (MFA)' }
+  { key: 'superadmin', label: 'Super-admin', hint: 'Console support (MFA)' }
 ];

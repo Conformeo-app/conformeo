@@ -36,9 +36,10 @@ import { SuperAdminScreen } from '../features/super-admin/SuperAdminScreen';
 import { EnterpriseHubScreen } from '../features/enterprise/EnterpriseHubScreen';
 import { TeamScreen } from '../features/team/TeamScreen';
 import { UxAcceleratorsScreen } from '../features/ux/UxAcceleratorsScreen';
+import { ModuleDisabledScreen } from '../screens/system/ModuleDisabledScreen';
 import { resetCurrentContext, setCurrentContext } from './contextStore';
 import { useEnabledModules } from './EnabledModulesProvider';
-import { navigationRef } from './navigation';
+import { navigationRef } from './navigationRef';
 import { SideMenu } from '../app/SideMenu';
 import { TopBar } from '../app/TopBar';
 import { flags } from '../data/feature-flags';
@@ -68,6 +69,7 @@ const SecurityStack = createNativeStackNavigator<SecurityStackParamList>();
 const EnterpriseStack = createNativeStackNavigator<EnterpriseStackParamList>();
 const AccountStack = createNativeStackNavigator<AccountStackParamList>();
 const QuickActionsStack = createNativeStackNavigator<{ QuickActionsHome: undefined }>();
+const ModuleDisabledStack = createNativeStackNavigator<{ ModuleDisabled: { moduleKey?: string; moduleLabel?: string; reason?: string } | undefined }>();
 
 const TEAM_HOME_COMPONENT = TeamScreen;
 
@@ -81,7 +83,7 @@ function DashboardStackScreen() {
         contentStyle: { backgroundColor: colors.bg }
       }}
     >
-      <DashboardStack.Screen name="DashboardHome" component={DashboardScreen} options={{ title: 'Dashboard' }} />
+      <DashboardStack.Screen name="DashboardHome" component={DashboardScreen} options={{ title: 'Tableau de bord' }} />
     </DashboardStack.Navigator>
   );
 }
@@ -322,6 +324,25 @@ function QuickActionsStackScreen() {
   );
 }
 
+function ModuleDisabledStackScreen() {
+  const { colors } = useTheme();
+
+  return (
+    <ModuleDisabledStack.Navigator
+      screenOptions={{
+        header: (props) => <TopBar {...props} />,
+        contentStyle: { backgroundColor: colors.bg }
+      }}
+    >
+      <ModuleDisabledStack.Screen
+        name="ModuleDisabled"
+        component={ModuleDisabledScreen}
+        options={{ title: 'Module désactivé' }}
+      />
+    </ModuleDisabledStack.Navigator>
+  );
+}
+
 export function AppNavigator() {
   assertRoutesIntegrity();
   const { width } = useWindowDimensions();
@@ -342,7 +363,7 @@ export function AppNavigator() {
 
     // Si l'org change en cours de session, on repart sur un état de navigation propre.
     if (lastOrgIdRef.current && lastOrgIdRef.current !== activeOrgId && navigationRef.isReady()) {
-      navigationRef.navigate('Dashboard');
+      navigationRef.navigate(ROUTES.DASHBOARD);
     }
 
     lastOrgIdRef.current = activeOrgId;
@@ -380,6 +401,14 @@ export function AppNavigator() {
     <NavigationContainer
       ref={navigationRef}
       theme={navTheme}
+      onStateChange={() => {
+        if (!__DEV__) return;
+        const route = navigationRef.getCurrentRoute();
+        if (route) {
+          // eslint-disable-next-line no-console
+          console.log(`[nav] route=${route.name}`);
+        }
+      }}
     >
       <Drawer.Navigator
         screenOptions={{
@@ -399,6 +428,7 @@ export function AppNavigator() {
         {sections.security ? <Drawer.Screen name={ROUTES.SECURITY} component={SecurityStackScreen} /> : null}
         {sections.enterprise ? <Drawer.Screen name={ROUTES.ENTERPRISE} component={EnterpriseStackScreen} /> : null}
         <Drawer.Screen name={ROUTES.ACCOUNT} component={AccountStackScreen} />
+        <Drawer.Screen name={ROUTES.MODULE_DISABLED} component={ModuleDisabledStackScreen} />
 
         {/* Hidden route: accessible via la top bar (quick actions globales). */}
         {availableModules.includes('accelerators') ? (

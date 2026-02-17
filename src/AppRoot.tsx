@@ -5,8 +5,6 @@ import { useAuth } from './core/auth';
 import { appEnv } from './core/env';
 import { security } from './core/security/hardening';
 import { AppShell } from './app/AppShell';
-import { AdminMfaEnrollmentScreen } from './features/auth/AdminMfaEnrollmentScreen';
-import { AuthAccessScreen } from './features/auth/AuthAccessScreen';
 import { EnabledModulesProvider } from './navigation/EnabledModulesProvider';
 import { Text } from './ui/components/Text';
 import { ThemeProvider, useTheme } from './ui/theme/ThemeProvider';
@@ -41,7 +39,7 @@ function InsecureEnvironmentView({ reason }: { reason: string }) {
 }
 
 export function AppRoot() {
-  const { loading, session, hasMembership, requiresMfaEnrollment } = useAuth();
+  const { loading, session } = useAuth();
   const [integrityChecked, setIntegrityChecked] = useState(!appEnv.hardeningBlockUnsafe);
   const [integrityError, setIntegrityError] = useState<string | null>(null);
 
@@ -93,10 +91,6 @@ export function AppRoot() {
           <InsecureEnvironmentView reason={integrityError} />
         ) : loading ? (
           <LoadingView />
-        ) : !session || hasMembership === false ? (
-          <AuthAccessScreen />
-        ) : requiresMfaEnrollment ? (
-          <AdminMfaEnrollmentScreen />
         ) : (
           <EnabledModulesProvider>
             <AppShell />

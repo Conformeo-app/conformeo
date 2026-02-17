@@ -1,169 +1,84 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import { useAuth } from '../../core/auth';
-import {
-  QuickAction,
-  applyQuickAction,
-  conflicts,
-  dashboard,
-  DashboardActivity,
-  DashboardAlert,
-  DashboardSummary,
-  DashboardWidgetKey,
-  DashboardWidgetsConfig,
-  useSyncStatus,
-  ux
-} from '../../data';
+import { applyQuickAction, ux } from '../../data/ux-accelerators';
+import { controlMode } from '../../data/control-mode';
+import { useEnabledModules } from '../../navigation/EnabledModulesProvider';
+import { nav } from '../../navigation/nav';
+import { ROUTES } from '../../navigation/routes';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
+import { KpiCard } from '../../ui/components/KpiCard';
+import { QuotaBadge } from '../../ui/components/QuotaBadge';
+import { RiskBadge } from '../../ui/components/RiskBadge';
 import { Text } from '../../ui/components/Text';
 import { Screen } from '../../ui/layout/Screen';
+import { ErrorState } from '../../ui/states/ErrorState';
+import { OfflineBanner } from '../../ui/states/OfflineBanner';
+import { SyncStatusPill } from '../../ui/states/SyncStatusPill';
 import { useTheme } from '../../ui/theme/ThemeProvider';
 import { SectionHeader } from '../common/SectionHeader';
-
-const ORG_SCOPE = '__ORG__';
-const DEMO_PROJECT_ID = 'chantier-exports-demo';
+import { getDashboardCockpit, type DashboardAlert, type DashboardCockpit, type ProjectSummary } from './dashboard.service';
+import { useGlobalSyncStatus } from '../../app/hooks/useGlobalSyncStatus';
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
     return error.message;
   }
-
-  return 'Erreur inconnue';
+  return 'Erreur inconnue.';
 }
 
-function formatDate(iso?: string) {
-  if (!iso) {
-    return '-';
-  }
-
-  const value = new Date(iso);
-  if (Number.isNaN(value.getTime())) {
-    return iso;
-  }
-
-  return value.toLocaleString('fr-FR', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+function alertTone(level: DashboardAlert['level']) {
+  if (level === 'CRIT') return 'danger';
+  if (level === 'WARN') return 'warning';
+  return 'info';
 }
 
-function widgetTitle(key: DashboardWidgetKey) {
-  if (key === 'open_tasks') return 'Tâches ouvertes';
-  if (key === 'blocked_tasks') return 'Tâches bloquées';
-  if (key === 'proofs') return 'Preuves';
-  if (key === 'documents') return 'Documents';
-  if (key === 'exports_recent') return 'Exports 7j';
-  if (key === 'alerts') return 'Alertes';
-  return 'Activité';
+function formatProofsKpi(pending: number, failed: number) {
+  if (pending <= 0 && failed <= 0) return '0';
+  if (failed > 0) return `${pending} / ${failed}`;
+  return String(pending);
 }
 
-function widgetValue(key: DashboardWidgetKey, summary: DashboardSummary | null) {
-  if (!summary) {
-    return '-';
-  }
-
-  if (key === 'open_tasks') return String(summary.openTasks);
-  if (key === 'blocked_tasks') return String(summary.blockedTasks);
-  if (key === 'proofs') return String(summary.proofs);
-  if (key === 'documents') return String(summary.documents);
-  if (key === 'exports_recent') return String(summary.recentExports);
-  if (key === 'alerts') return String(summary.alerts.length);
-  return String(summary.activity.length);
-}
-
-function alertColor(level: DashboardAlert['level'], rose: string, amber: string, teal: string) {
-  if (level === 'ERROR') return rose;
-  if (level === 'WARN') return amber;
-  return teal;
+function resolveProjectTarget(cockpit: DashboardCockpit | null) {
+  if (cockpit?.lastProjectId) return cockpit.lastProjectId;
+  if (cockpit?.projects?.[0]?.projectId) return cockpit.projects[0].projectId;
+  return null;
 }
 
 export function DashboardScreen() {
   const { colors, spacing, radii } = useTheme();
   const { activeOrgId, user, role } = useAuth();
-  const { status: syncStatus, syncNow } = useSyncStatus();
+  const { availableModules } = useEnabledModules();
+  const global = useGlobalSyncStatus();
 
-  const [scopeKey, setScopeKey] = useState<string>(ORG_SCOPE);
-  const [projectOptions, setProjectOptions] = useState<string[]>([]);
-
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [widgetsConfig, setWidgetsConfig] = useState<DashboardWidgetsConfig | null>(null);
-  const [selectedWidget, setSelectedWidget] = useState<DashboardWidgetKey>('alerts');
-  const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
-  const [openConflictsCount, setOpenConflictsCount] = useState(0);
-
+  const [cockpit, setCockpit] = useState<DashboardCockpit | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  const projectId = scopeKey === ORG_SCOPE ? undefined : scopeKey;
+  const hasTasks = availableModules.includes('tasks');
+  const hasMedia = availableModules.includes('media');
+  const hasConflicts = availableModules.includes('conflicts');
+  const hasControl = availableModules.includes('control');
+  const hasExports = availableModules.includes('exports');
+  // Projects are a core navigation section (not feature-flagged as a module).
+  const hasProjects = true;
+  const hasOrgsAdmin = availableModules.includes('orgs');
 
-  const scope = useMemo(() => {
-    if (!activeOrgId) {
-      return null;
-    }
-
-    return {
-      orgId: activeOrgId,
-      projectId
-    };
-  }, [activeOrgId, projectId]);
-
-  const activeWidgets = useMemo(() => {
-    const widgets = widgetsConfig?.widgets ?? [];
-    return widgets.filter((item) => item.enabled).sort((left, right) => left.order - right.order);
-  }, [widgetsConfig]);
-
-  const widgetByKey = useMemo(() => {
-    const map = new Map<DashboardWidgetKey, DashboardWidgetsConfig['widgets'][number]>();
-    for (const item of widgetsConfig?.widgets ?? []) {
-      map.set(item.key, item);
-    }
-    return map;
-  }, [widgetsConfig]);
-
-  const quickActionBlocked = useMemo(
-    () => ({
-      task: widgetByKey.get('open_tasks')?.lockedByFeatureFlag === true,
-      proof: widgetByKey.get('proofs')?.lockedByFeatureFlag === true,
-      report: widgetByKey.get('exports_recent')?.lockedByFeatureFlag === true
-    }),
-    [widgetByKey]
-  );
-
-  const refreshProjects = useCallback(async () => {
-    if (!activeOrgId) {
-      setProjectOptions([]);
-      setScopeKey(ORG_SCOPE);
-      return;
-    }
-
-    const projects = await dashboard.listProjects({ orgId: activeOrgId });
-
-    const merged = projects.includes(DEMO_PROJECT_ID) ? projects : [DEMO_PROJECT_ID, ...projects];
-    const deduped = Array.from(new Set(merged)).sort((left, right) => left.localeCompare(right));
-
-    setProjectOptions(deduped);
-    setScopeKey((current) => {
-      if (current === ORG_SCOPE) {
-        return current;
-      }
-
-      if (deduped.includes(current)) {
-        return current;
-      }
-
-      return ORG_SCOPE;
+  useEffect(() => {
+    ux.setContext({
+      org_id: activeOrgId ?? undefined,
+      user_id: user?.id ?? undefined
     });
-  }, [activeOrgId]);
+    controlMode.setContext({ org_id: activeOrgId ?? undefined, user_id: user?.id ?? undefined });
+  }, [activeOrgId, user?.id]);
 
-  const refreshDashboard = useCallback(async () => {
-    if (!scope) {
-      setSummary(null);
-      setWidgetsConfig(null);
+  const refresh = useCallback(async () => {
+    if (!activeOrgId) {
+      setCockpit(null);
+      setError(null);
       return;
     }
 
@@ -171,468 +86,335 @@ export function DashboardScreen() {
     setError(null);
 
     try {
-      dashboard.setContext({
-        org_id: scope.orgId,
-        user_id: user?.id,
-        project_id: scope.projectId
-      });
-
-      const [nextSummary, nextWidgets, nextOpenConflicts] = await Promise.all([
-        dashboard.getSummary(scope),
-        dashboard.getWidgetsConfig(scope),
-        conflicts.getOpenCount(scope.orgId)
-      ]);
-
-      setSummary(nextSummary);
-      setWidgetsConfig(nextWidgets);
-      setOpenConflictsCount(nextOpenConflicts);
-
-      const selected = nextWidgets.widgets.find((item) => item.key === selectedWidget);
-      if (!selected || !selected.enabled) {
-        const firstEnabled = nextWidgets.widgets.find((item) => item.enabled);
-        if (firstEnabled) {
-          setSelectedWidget(firstEnabled.key);
-        }
-      }
-    } catch (refreshError) {
-      setError(toErrorMessage(refreshError));
+      const next = await getDashboardCockpit({ orgId: activeOrgId, userId: user?.id });
+      setCockpit(next);
+    } catch (e) {
+      setError(toErrorMessage(e));
     } finally {
       setLoading(false);
     }
-  }, [scope, selectedWidget, user?.id]);
-
-  const refreshQuickActions = useCallback(async () => {
-    const next = await ux.getQuickActions(role ?? 'FIELD');
-    setQuickActions(next);
-  }, [role]);
+  }, [activeOrgId, user?.id]);
 
   useEffect(() => {
-    ux.setContext({
-      org_id: activeOrgId ?? undefined,
-      user_id: user?.id ?? undefined,
-      project_id: scope?.projectId
-    });
+    void refresh();
+  }, [refresh]);
 
-    conflicts.setContext({
-      org_id: activeOrgId ?? undefined,
-      user_id: user?.id ?? undefined
-    });
-  }, [activeOrgId, scope?.projectId, user?.id]);
+  const targetProjectId = useMemo(() => resolveProjectTarget(cockpit), [cockpit]);
 
-  useEffect(() => {
-    void refreshProjects();
-  }, [refreshProjects]);
+  const runQuickAction = useCallback(
+    async (key: Parameters<typeof applyQuickAction>[0]) => {
+      if (!activeOrgId || !user?.id) {
+        setError('Session invalide.');
+        return;
+      }
 
-  useEffect(() => {
-    void refreshDashboard();
-  }, [refreshDashboard]);
+      const projectId = targetProjectId;
+      if (!projectId) {
+        setError('Aucun chantier sélectionnable (crée un chantier).');
+        return;
+      }
 
-  useEffect(() => {
-    void refreshQuickActions();
-  }, [refreshQuickActions]);
+      setBusy(true);
+      setError(null);
+      setInfo(null);
 
-  const withBusy = async (work: () => Promise<void>) => {
+      try {
+        const result = await applyQuickAction(key, { projectId });
+        setInfo(result.message);
+
+        if (key === 'NEW_TASK') {
+          nav.openProject(projectId, 'Tasks');
+        } else if (key === 'ADD_PROOF') {
+          nav.openProject(projectId, 'Media');
+        } else if (key === 'GENERATE_CONTROL_PACK') {
+          nav.openProject(projectId, 'Control');
+        } else if (key === 'GENERATE_REPORT') {
+          nav.openProject(projectId, 'Overview');
+        } else if (key === 'CREATE_CHECKLIST') {
+          nav.openProject(projectId, 'Control');
+        }
+
+        await refresh();
+      } catch (e) {
+        setError(toErrorMessage(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeOrgId, refresh, targetProjectId, user?.id]
+  );
+
+  const toggleControlMode = useCallback(async () => {
+    if (!activeOrgId || !user?.id) {
+      setError('Session invalide.');
+      return;
+    }
+
+    const projectId = targetProjectId;
+    if (!projectId) {
+      setError('Aucun chantier sélectionnable (crée un chantier).');
+      return;
+    }
+
     setBusy(true);
     setError(null);
     setInfo(null);
 
     try {
-      await work();
-    } catch (actionError) {
-      setError(toErrorMessage(actionError));
+      const enabled = await controlMode.isEnabled(projectId).catch(() => false);
+      if (enabled) {
+        await controlMode.disable(projectId);
+        setInfo('Mode contrôle désactivé.');
+      } else {
+        await controlMode.enable(projectId);
+        setInfo('Mode contrôle activé.');
+      }
+
+      nav.openProject(projectId, 'Control');
+      await refresh();
+    } catch (e) {
+      setError(toErrorMessage(e));
     } finally {
       setBusy(false);
     }
-  };
+  }, [activeOrgId, refresh, targetProjectId, user?.id]);
 
-  const toggleWidget = async (key: DashboardWidgetKey) => {
-    if (!widgetsConfig || !scope) {
-      return;
-    }
+  const goToAlert = useCallback(
+    (alert: DashboardAlert) => {
+      const screen = alert.ctaRoute.screen;
+      const params = alert.ctaRoute.params;
 
-    const current = widgetsConfig.widgets.find((item) => item.key === key);
-    if (!current || current.lockedByFeatureFlag) {
-      return;
-    }
-
-    await withBusy(async () => {
-      const next = await dashboard.setWidgetsConfig(
-        {
-          widgets: [{ key, enabled: !current.enabled, order: current.order }]
-        },
-        scope
-      );
-
-      setWidgetsConfig(next);
-      const selected = next.widgets.find((item) => item.key === selectedWidget);
-      if (!selected || !selected.enabled) {
-        const firstEnabled = next.widgets.find((item) => item.enabled);
-        if (firstEnabled) {
-          setSelectedWidget(firstEnabled.key);
-        }
+      if (screen === 'ProjectDetail') {
+        const projectId = params?.projectId;
+        nav.openProject(projectId, params?.tab, { mediaUploadStatus: params?.mediaUploadStatus });
+        return;
       }
+
+      if (screen === ROUTES.PROJECTS) {
+        nav.goProjects();
+        return;
+      }
+
+      if (screen === ROUTES.SECURITY) {
+        nav.goSecurity(params);
+        return;
+      }
+
+      if (screen === ROUTES.ENTERPRISE) {
+        nav.goEnterprise(params);
+        return;
+      }
+
+      if (screen === ROUTES.DASHBOARD) {
+        nav.goDashboard();
+        return;
+      }
+
+      // fallback (rare)
+      (nav as any).navigate?.(screen, params);
+    },
+    []
+  );
+
+  const stats = cockpit?.stats;
+
+  const kpis = useMemo(() => {
+    const items: Array<{
+      key: string;
+      title: string;
+      value: string;
+      icon: any;
+      tone: any;
+      onPress?: () => void;
+      visible: boolean;
+    }> = [
+      {
+        key: 'projects',
+        title: 'Chantiers actifs',
+        value: String(stats?.activeProjects ?? 0),
+        icon: 'office-building',
+        tone: 'primary',
+        onPress: hasProjects ? () => nav.goProjects() : undefined,
+        visible: true
+      },
+      {
+        key: 'open_tasks',
+        title: 'Tâches ouvertes',
+        value: String(stats?.openTasks ?? 0),
+        icon: 'checkbox-marked-outline',
+        tone: 'info',
+        onPress: targetProjectId && hasTasks ? () => nav.openProject(targetProjectId, 'Tasks') : hasProjects ? () => nav.goProjects() : undefined,
+        visible: hasTasks
+      },
+      {
+        key: 'blocked_tasks',
+        title: 'Bloquées',
+        value: String(stats?.blockedTasks ?? 0),
+        icon: 'alert',
+        tone: 'danger',
+        onPress: targetProjectId && hasTasks ? () => nav.openProject(targetProjectId, 'Tasks') : hasProjects ? () => nav.goProjects() : undefined,
+        visible: hasTasks
+      },
+      {
+        key: 'proofs',
+        title: 'Preuves (att/échec)',
+        value: formatProofsKpi(stats?.pendingUploads ?? 0, stats?.failedUploads ?? 0),
+        icon: 'camera',
+        tone: (stats?.failedUploads ?? 0) > 0 ? 'danger' : (stats?.pendingUploads ?? 0) > 0 ? 'info' : 'neutral',
+        onPress:
+          targetProjectId && hasMedia
+            ? () =>
+                nav.openProject(targetProjectId, 'Media', {
+                  mediaUploadStatus: (stats?.failedUploads ?? 0) > 0 ? 'FAILED' : (stats?.pendingUploads ?? 0) > 0 ? 'PENDING' : 'ALL'
+                })
+            : hasProjects
+              ? () => nav.goProjects()
+              : undefined,
+        visible: hasMedia
+      }
+    ];
+
+    return items.filter((item) => item.visible).slice(0, 4);
+  }, [hasMedia, hasProjects, hasTasks, stats?.activeProjects, stats?.blockedTasks, stats?.failedUploads, stats?.openTasks, stats?.pendingUploads, targetProjectId]);
+
+  const alerts = useMemo(() => {
+    const list = cockpit?.alerts ?? [];
+    return list.filter((a) => {
+      if (!hasConflicts && a.key === 'SYNC_CONFLICTS') return false;
+      if (!hasOrgsAdmin && a.key === 'STORAGE_QUOTA') return false;
+      return true;
     });
-  };
+  }, [cockpit?.alerts, hasConflicts, hasOrgsAdmin]);
 
-  const isQuickActionDisabled = useCallback(
-    (action: QuickAction) => {
-      const targetProject = projectId ?? projectOptions[0];
+  const projectsRows = useMemo(() => cockpit?.projects ?? [], [cockpit?.projects]);
 
-      if (busy) {
-        return true;
-      }
-
-      if (action.requires_project && !targetProject) {
-        return true;
-      }
-
-      if (action.key === 'NEW_TASK') {
-        return quickActionBlocked.task;
-      }
-
-      if (action.key === 'ADD_PROOF') {
-        return quickActionBlocked.proof;
-      }
-
-      if (action.key === 'GENERATE_REPORT') {
-        return quickActionBlocked.report;
-      }
-
-      return false;
-    },
-    [busy, projectId, projectOptions, quickActionBlocked]
-  );
-
-  const runQuickAction = useCallback(
-    async (action: QuickAction) => {
-      if (!activeOrgId || !user?.id) {
-        return;
-      }
-
-      const targetProject = projectId ?? projectOptions[0];
-      if (action.requires_project && !targetProject) {
-        setError('Sélectionne un chantier avant de lancer cette action.');
-        return;
-      }
-
-      await withBusy(async () => {
-        const result = await applyQuickAction(action.key, {
-          projectId: targetProject
-        });
-
-        setInfo(result.message);
-        await refreshDashboard();
-      });
-    },
-    [activeOrgId, projectId, projectOptions, refreshDashboard, user?.id]
-  );
-
-  const drilldownBody = useMemo(() => {
-    if (!summary) {
-      return null;
-    }
-
-    if (selectedWidget === 'open_tasks') {
-      return (
-        <View style={{ gap: spacing.xs }}>
-          {summary.openTaskPreviews.slice(0, 8).map((task) => (
-            <View key={task.id}>
-              <Text variant="bodyStrong" numberOfLines={1}>
-                {task.title}
-              </Text>
-              <Text variant="caption" style={{ color: colors.slate }}>
-                {task.status} • {task.priority} • {formatDate(task.updated_at)}
-              </Text>
-            </View>
-          ))}
-        </View>
-      );
-    }
-
-    if (selectedWidget === 'blocked_tasks') {
-      return (
-        <View style={{ gap: spacing.xs }}>
-          {summary.blockedTaskPreviews.slice(0, 8).map((task) => (
-            <View key={task.id}>
-              <Text variant="bodyStrong" numberOfLines={1}>
-                {task.title}
-              </Text>
-              <Text variant="caption" style={{ color: colors.slate }}>
-                {task.status} • {formatDate(task.updated_at)}
-              </Text>
-            </View>
-          ))}
-        </View>
-      );
-    }
-
-    if (selectedWidget === 'proofs') {
-      return (
-        <View style={{ gap: spacing.sm }}>
-          {summary.latestProofs.slice(0, 8).map((proof) => (
-            <Card key={proof.id}>
-              {proof.local_thumb_path ? (
-                <Image
-                  source={{ uri: proof.local_thumb_path }}
-                  style={{ width: '100%', height: 110, borderRadius: radii.md, marginBottom: spacing.xs }}
-                  resizeMode="cover"
-                />
-              ) : null}
-              <Text variant="bodyStrong" numberOfLines={1}>
-                {proof.tag ?? proof.mime}
-              </Text>
-              <Text variant="caption" style={{ color: colors.slate }}>
-                {proof.upload_status} • {formatDate(proof.created_at)}
-              </Text>
-            </Card>
-          ))}
-        </View>
-      );
-    }
-
-    if (selectedWidget === 'documents') {
-      return (
-        <View style={{ gap: spacing.xs }}>
-          {summary.latestDocuments.slice(0, 8).map((document) => (
-            <View key={document.id}>
-              <Text variant="bodyStrong" numberOfLines={1}>
-                {document.title}
-              </Text>
-              <Text variant="caption" style={{ color: colors.slate }}>
-                {document.doc_type} • {document.status} • {formatDate(document.updated_at)}
-              </Text>
-            </View>
-          ))}
-        </View>
-      );
-    }
-
-    if (selectedWidget === 'exports_recent') {
-      return (
-        <View style={{ gap: spacing.xs }}>
-          {summary.latestExports.slice(0, 8).map((exportRow) => (
-            <View key={exportRow.id}>
-              <Text variant="bodyStrong">{exportRow.type}</Text>
-              <Text variant="caption" style={{ color: colors.slate }}>
-                {exportRow.status} • {formatDate(exportRow.finished_at ?? exportRow.created_at)}
-              </Text>
-            </View>
-          ))}
-        </View>
-      );
-    }
-
-    if (selectedWidget === 'alerts') {
-      return (
-        <View style={{ gap: spacing.xs }}>
-          {summary.alerts.length === 0 ? (
-            <Text variant="caption" style={{ color: colors.slate }}>
-              Aucune alerte active.
-            </Text>
-          ) : (
-            summary.alerts.map((alert) => (
-              <Text
-                key={alert.code}
-                variant="caption"
-                style={{ color: alertColor(alert.level, colors.rose, colors.amber, colors.tealDark) }}
-              >
-                {alert.message}
-              </Text>
-            ))
-          )}
-        </View>
-      );
-    }
-
-    return (
-      <View style={{ gap: spacing.xs }}>
-        {summary.activity.slice(0, 12).map((item: DashboardActivity) => (
-          <View key={item.id}>
-            <Text variant="caption" style={{ color: colors.slate }}>
-              {item.entity} • {formatDate(item.at)}
-            </Text>
-            <Text variant="bodyStrong">{item.title}</Text>
-            {item.subtitle ? (
-              <Text variant="caption" style={{ color: colors.slate }}>
-                {item.subtitle}
-              </Text>
-            ) : null}
-          </View>
-        ))}
-      </View>
-    );
-  }, [colors.amber, colors.rose, colors.slate, colors.tealDark, radii.md, selectedWidget, spacing.sm, spacing.xs, summary]);
+  const quotaBadge = useMemo(() => {
+    return <QuotaBadge level={cockpit?.quotaLevel ?? 'OK'} />;
+  }, [cockpit?.quotaLevel]);
 
   return (
     <Screen>
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: spacing.lg }}
-        keyboardShouldPersistTaps="handled"
-      >
-        <SectionHeader
-          title="Dashboard"
-          subtitle="Synthèse chantier/entreprise locale: activité, alertes, widgets rapides et actions terrain."
-        />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: spacing.xl }} keyboardShouldPersistTaps="handled">
+        <SectionHeader title="Tableau de bord" subtitle="Santé globale, alertes, chantiers prioritaires, actions rapides (offline-first)." />
 
-        <Card>
-          <Text variant="h2">Scope</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: spacing.sm, marginTop: spacing.sm, paddingRight: spacing.sm }}
-          >
-            <Pressable
-              onPress={() => setScopeKey(ORG_SCOPE)}
-              style={{
-                borderRadius: radii.pill,
-                borderWidth: 1,
-                borderColor: scopeKey === ORG_SCOPE ? colors.teal : colors.fog,
-                backgroundColor: scopeKey === ORG_SCOPE ? colors.mint : colors.white,
-                paddingHorizontal: spacing.md,
-                paddingVertical: spacing.xs
-              }}
-            >
-              <Text variant="caption">Entreprise</Text>
-            </Pressable>
+        {global.isOffline ? <OfflineBanner /> : null}
+        <View style={{ marginTop: spacing.sm }}>
+          <SyncStatusPill pending={global.pendingOps} conflicts={global.conflicts} failedUploads={global.failedUploads} />
+        </View>
 
-            {projectOptions.map((option) => {
-              const active = option === scopeKey;
-              return (
-                <Pressable
-                  key={option}
-                  onPress={() => setScopeKey(option)}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm, alignItems: 'center' }}>
+          {quotaBadge}
+          {loading ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+          <Button label="Rafraîchir" kind="ghost" onPress={() => void refresh()} disabled={loading || busy} />
+        </View>
+
+        {error ? (
+          <Card style={{ marginTop: spacing.md }}>
+            <ErrorState title="Erreur" message={error} ctaLabel="Réessayer" onCta={() => void refresh()} />
+          </Card>
+        ) : null}
+
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.md }}>
+          {kpis.map((kpi) => (
+            <KpiCard key={kpi.key} title={kpi.title} value={kpi.value} icon={kpi.icon} tone={kpi.tone} onPress={kpi.onPress} style={{ flexGrow: 1, minWidth: 220 }} />
+          ))}
+        </View>
+
+        <Card style={{ marginTop: spacing.md }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text variant="h2">Alertes</Text>
+            <Text variant="caption" style={{ color: colors.mutedText }}>
+              Top 3
+            </Text>
+          </View>
+
+          <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+            {alerts.length === 0 ? (
+              <Text variant="caption" style={{ color: colors.mutedText }}>
+                Aucune alerte active.
+              </Text>
+            ) : (
+              alerts.map((alert) => (
+                <View
+                  key={alert.key}
                   style={{
-                    borderRadius: radii.pill,
                     borderWidth: 1,
-                    borderColor: active ? colors.teal : colors.fog,
-                    backgroundColor: active ? colors.mint : colors.white,
-                    paddingHorizontal: spacing.md,
-                    paddingVertical: spacing.xs
+                    borderColor: colors.border,
+                    borderRadius: radii.md,
+                    padding: spacing.md,
+                    backgroundColor: colors.surfaceAlt
                   }}
                 >
-                  <Text variant="caption">{option}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.sm }}>
-            Sync: {syncStatus.phase} • Queue: {syncStatus.queueDepth} • Dead letters: {syncStatus.deadLetterCount}
-          </Text>
-
-          <Text
-            variant="caption"
-            style={{ color: openConflictsCount > 0 ? colors.rose : colors.slate, marginTop: spacing.xs }}
-          >
-            Conflits ouverts: {openConflictsCount}
-          </Text>
-
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
-            <Button label="Rafraîchir" kind="ghost" onPress={() => void refreshDashboard()} disabled={loading || busy} />
-            <Button label="Sync maintenant" kind="ghost" onPress={() => void syncNow()} disabled={busy} />
+                  <Text variant="bodyStrong" style={{ color: (colors as any)[alertTone(alert.level)] ?? colors.text }}>
+                    {alert.title}
+                  </Text>
+                  <View style={{ marginTop: spacing.sm, flexDirection: 'row', justifyContent: 'flex-end' }}>
+                    <Button label={alert.ctaLabel} kind="ghost" onPress={() => goToAlert(alert)} disabled={busy} />
+                  </View>
+                </View>
+              ))
+            )}
           </View>
         </Card>
 
         <Card style={{ marginTop: spacing.md }}>
-          <Text variant="h2">Quick Actions</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
-            {quickActions.map((action) => (
-              <Button
-                key={action.key}
-                label={action.label}
-                kind={action.key === 'NEW_TASK' ? 'primary' : 'ghost'}
-                onPress={() => void runQuickAction(action)}
-                disabled={isQuickActionDisabled(action)}
-              />
-            ))}
-            {quickActions.length === 0 ? (
-              <Text variant="caption" style={{ color: colors.slate }}>
-                Aucune action rapide disponible.
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text variant="h2">Mes chantiers</Text>
+            <Text variant="caption" style={{ color: colors.mutedText }}>
+              8 max • tri risque/recents
+            </Text>
+          </View>
+
+          <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+            {projectsRows.length === 0 ? (
+              <Text variant="caption" style={{ color: colors.mutedText }}>
+                Aucun chantier. Crée ton premier chantier.
               </Text>
+            ) : (
+              projectsRows.map((row) => (
+                <ProjectRow
+                  key={row.projectId}
+                  row={row}
+                  onPress={() => nav.openProject(row.projectId, 'Overview')}
+                />
+              ))
+            )}
+          </View>
+
+          {hasProjects ? (
+            <View style={{ marginTop: spacing.md, flexDirection: 'row', justifyContent: 'flex-end' }}>
+              <Button label="Voir tous" kind="ghost" onPress={() => nav.goProjects()} disabled={busy} />
+            </View>
+          ) : null}
+        </Card>
+
+        <Card style={{ marginTop: spacing.md }}>
+          <Text variant="h2">Actions rapides</Text>
+          <Text variant="caption" style={{ color: colors.mutedText, marginTop: spacing.xs }}>
+            Ciblées sur le dernier chantier ouvert (ou le plus prioritaire).
+          </Text>
+
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
+            {hasTasks ? (
+              <Button label="Tâche" onPress={() => void runQuickAction('NEW_TASK')} disabled={busy} />
+            ) : null}
+            {hasMedia ? (
+              <Button label="Preuve" kind="ghost" onPress={() => void runQuickAction('ADD_PROOF')} disabled={busy} />
+            ) : null}
+            {hasProjects ? (
+              <Button label="Chantier" kind="ghost" onPress={() => nav.createProject()} disabled={busy} />
+            ) : null}
+            {hasExports ? (
+              <Button label="Pack contrôle" kind="ghost" onPress={() => void runQuickAction('GENERATE_CONTROL_PACK')} disabled={busy} />
+            ) : null}
+            {hasControl ? (
+              <Button label="Mode contrôle" kind="ghost" onPress={() => void toggleControlMode()} disabled={busy} />
             ) : null}
           </View>
         </Card>
 
-        <Card style={{ marginTop: spacing.md }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text variant="h2">Widgets</Text>
-            {loading ? <ActivityIndicator size="small" color={colors.teal} /> : null}
-          </View>
-
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
-            {activeWidgets.map((widget) => {
-              const active = selectedWidget === widget.key;
-              return (
-                <Pressable
-                  key={widget.key}
-                  onPress={() => setSelectedWidget(widget.key)}
-                  style={{
-                    borderWidth: 1,
-                    borderColor: active ? colors.teal : colors.fog,
-                    backgroundColor: active ? colors.mint : colors.white,
-                    borderRadius: radii.md,
-                    padding: spacing.md,
-                    minWidth: 138,
-                    flex: 1
-                  }}
-                >
-                  <Text variant="caption" style={{ color: colors.slate }}>
-                    {widgetTitle(widget.key)}
-                  </Text>
-                  <Text variant="h2" style={{ marginTop: spacing.xs }}>
-                    {widgetValue(widget.key, summary)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.sm }}>
-            Tap widget → drill-down local sans appel réseau.
-          </Text>
-        </Card>
-
-        <Card style={{ marginTop: spacing.md }}>
-          <Text variant="h2">Configurer Widgets</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
-            {(widgetsConfig?.widgets ?? []).map((item) => {
-              const blocked = item.lockedByFeatureFlag;
-              return (
-                <Button
-                  key={item.key}
-                  label={`${item.enabled ? '✓' : '○'} ${widgetTitle(item.key)}`}
-                  kind={item.enabled ? 'primary' : 'ghost'}
-                  onPress={() => void toggleWidget(item.key)}
-                  disabled={busy || blocked}
-                />
-              );
-            })}
-          </View>
-          <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.sm }}>
-            Les widgets verrouillés sont désactivés par feature flag d’organisation.
-          </Text>
-        </Card>
-
-        <Card style={{ marginTop: spacing.md }}>
-          <Text variant="h2">Drill-down • {widgetTitle(selectedWidget)}</Text>
-          <View style={{ marginTop: spacing.sm }}>{drilldownBody}</View>
-        </Card>
-
-        {syncStatus.lastError ? (
-          <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
-            Dernière erreur sync: {syncStatus.lastError}
-          </Text>
-        ) : null}
-
-        {error ? (
-          <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
-            {error}
-          </Text>
-        ) : null}
-
         {info ? (
-          <Text variant="caption" style={{ color: colors.tealDark, marginTop: spacing.sm }}>
+          <Text variant="caption" style={{ color: colors.success, marginTop: spacing.md }}>
             {info}
           </Text>
         ) : null}
@@ -640,3 +422,47 @@ export function DashboardScreen() {
     </Screen>
   );
 }
+
+function ProjectRow({
+  row,
+  onPress
+}: {
+  row: ProjectSummary;
+  onPress: () => void;
+}) {
+  const { colors, spacing, radii } = useTheme();
+
+  const subtitle = `${row.openTasks} ouvertes • ${row.blockedTasks} bloquées • ${row.pendingUploads} uploads en attente`;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        {
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: radii.md,
+          padding: spacing.md,
+          backgroundColor: colors.surface,
+          opacity: pressed ? 0.9 : 1
+        }
+      ]}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text variant="bodyStrong" numberOfLines={1}>
+            {row.name}
+          </Text>
+          <Text variant="caption" style={{ color: colors.mutedText, marginTop: spacing.xs }} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        </View>
+        <RiskBadge level={row.risk} />
+      </View>
+    </Pressable>
+  );
+}
+
+// Dev guardrail: used by navigation wiring assertions.
+(DashboardScreen as any).screenKey = 'DASHBOARD';

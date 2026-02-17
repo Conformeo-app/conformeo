@@ -20,16 +20,16 @@ function shortId(value: string | null | undefined, max = 18) {
 
 function SyncBadge({ phase }: { phase: 'idle' | 'syncing' | 'offline' | 'error' }) {
   const label = useMemo(() => {
-    if (phase === 'syncing') return 'Pending';
-    if (phase === 'offline') return 'Offline';
-    if (phase === 'error') return 'Failed';
-    return 'Synced';
+    if (phase === 'syncing') return 'En cours';
+    if (phase === 'offline') return 'Hors ligne';
+    if (phase === 'error') return 'Échec';
+    return 'OK';
   }, [phase]);
 
   const tone = phase === 'error' ? 'danger' : phase === 'offline' ? 'warning' : phase === 'syncing' ? 'info' : 'success';
   const icon = phase === 'offline' ? 'wifi-off' : phase === 'error' ? 'alert-circle' : 'sync';
 
-  return <Badge tone={tone} label={`Sync ${label}`} icon={icon} />;
+  return <Badge tone={tone} label={`Synchronisation ${label}`} icon={icon} />;
 }
 
 function navigateToSearch(navigation: NavigationProp<ParamListBase>) {

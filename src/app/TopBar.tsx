@@ -14,6 +14,7 @@ import { SyncStatusPill } from '../ui/states/SyncStatusPill';
 import { useAppNavigationContext } from '../navigation/contextStore';
 import { useEnabledModules } from '../navigation/EnabledModulesProvider';
 import { useGlobalSyncStatus } from './hooks/useGlobalSyncStatus';
+import { ROUTES } from '../navigation/routes';
 
 const MIN_WIDE_LAYOUT_WIDTH = 1024;
 
@@ -26,16 +27,16 @@ function shortId(value: string | null | undefined, max = 18) {
 function navigateToAccount(navigation: NavigationProp<ParamListBase>) {
   const parent = navigation.getParent();
   if (parent) {
-    (parent as any).navigate('Account');
+    (parent as any).navigate(ROUTES.ACCOUNT);
     return;
   }
-  (navigation as any).navigate('Account');
+  (navigation as any).navigate(ROUTES.ACCOUNT);
 }
 
 function navigateToConflicts(navigation: NavigationProp<ParamListBase>) {
   const parent = navigation.getParent();
   if (parent) {
-    (parent as any).navigate('Security', { screen: 'Conflicts' });
+    (parent as any).navigate(ROUTES.SECURITY, { screen: 'Conflicts' });
     return;
   }
   (navigation as any).navigate('Conflicts');
@@ -98,12 +99,12 @@ export function TopBar(props: NativeStackHeaderProps) {
   const syncIcon = syncStatus.phase === 'offline' ? 'wifi-off' : syncStatus.phase === 'error' ? 'alert-circle' : 'sync';
   const syncLabel =
     syncStatus.phase === 'error'
-      ? 'Sync Failed'
+      ? 'Synchronisation : échec'
       : syncStatus.phase === 'offline'
-        ? 'Sync Offline'
+        ? 'Synchronisation : hors ligne'
         : global.pendingOps > 0
-          ? `Sync Pending · ${global.pendingOps}`
-          : 'Sync OK';
+          ? `Synchronisation en attente · ${global.pendingOps}`
+          : 'Synchronisation OK';
 
   const showConflicts = availableModules.includes('conflicts') && global.conflicts > 0;
 

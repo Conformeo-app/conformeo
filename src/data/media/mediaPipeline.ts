@@ -734,16 +734,16 @@ export const media = {
   async enqueueUpload(assetId: string) {
     const asset = await getByIdInternal(assetId);
     if (!asset) {
-      throw new Error(`Media asset not found: ${assetId}`);
+      throw new Error(`Média introuvable : ${assetId}`);
     }
 
     if (!asset.watermark_applied) {
-      throw new Error('Media must be processed before upload.');
+      throw new Error('Le média doit être traité avant téléversement.');
     }
 
     const pendingCount = await this.countPendingUploads();
     if (pendingCount >= MEDIA_CONFIG.maxPendingUploads && asset.upload_status !== 'PENDING') {
-      throw new Error('Upload queue limit reached (500 pending assets).');
+      throw new Error('Limite atteinte : 500 médias en attente de téléversement.');
     }
 
     await updateAsset(assetId, {
@@ -941,32 +941,42 @@ export const media = {
     });
   },
 
-  async countPendingUploads() {
+  async countPendingUploads(orgId?: string) {
     await ensureSetup();
     const db = await getDb();
+    const org = typeof orgId === 'string' ? orgId.trim() : '';
+    const orgClause = org ? ' AND org_id = ?' : '';
     const row = await db.getFirstAsync<{ count: number }>(
       `
         SELECT COUNT(*) AS count
         FROM ${TABLE_NAME}
-        WHERE upload_status = 'PENDING'
-           OR upload_status = 'UPLOADING'
-           OR (upload_status = 'FAILED' AND retry_count < ?)
+        WHERE (
+          upload_status = 'PENDING'
+          OR upload_status = 'UPLOADING'
+          OR (upload_status = 'FAILED' AND retry_count < ?)
+        )
+        ${orgClause}
       `,
-      securityPolicies.maxSyncAttempts
+      securityPolicies.maxSyncAttempts,
+      ...(org ? [org] : [])
     );
 
     return row?.count ?? 0;
   },
 
-  async countFailedUploads() {
+  async countFailedUploads(orgId?: string) {
     await ensureSetup();
     const db = await getDb();
+    const org = typeof orgId === 'string' ? orgId.trim() : '';
+    const orgClause = org ? ' AND org_id = ?' : '';
     const row = await db.getFirstAsync<{ count: number }>(
       `
         SELECT COUNT(*) AS count
         FROM ${TABLE_NAME}
         WHERE upload_status = 'FAILED'
-      `
+        ${orgClause}
+      `,
+      ...(org ? [org] : [])
     );
 
     return row?.count ?? 0;

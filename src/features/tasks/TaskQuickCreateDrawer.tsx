@@ -1,5 +1,5 @@
 import React from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import type { TaskStatus } from '../../data/tasks';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
@@ -50,23 +50,22 @@ export function TaskQuickCreateDrawer({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} onPress={onClose} />
+      <View style={{ flex: 1 }}>
+        <Pressable style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.35)' }]} onPress={onClose} />
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View
-          style={{
-            position: 'absolute',
-            right: 0,
-            top: 0,
-            bottom: 0,
-            width: 420,
-            maxWidth: '92%',
-            backgroundColor: colors.sand,
-            padding: spacing.lg,
-            borderTopLeftRadius: radii.lg,
-            borderBottomLeftRadius: radii.lg
-          }}
-        >
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'flex-end' }}>
+            <View
+              style={{
+                width: 420,
+                maxWidth: '92%',
+                height: '100%',
+                backgroundColor: colors.sand,
+                padding: spacing.lg,
+                borderTopLeftRadius: radii.lg,
+                borderBottomLeftRadius: radii.lg
+              }}
+            >
           <Card>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
               <Text variant="h2">Nouvelle tache</Text>
@@ -146,9 +145,10 @@ export function TaskQuickCreateDrawer({
               </Text>
             ) : null}
           </Card>
-        </View>
-      </KeyboardAvoidingView>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
-

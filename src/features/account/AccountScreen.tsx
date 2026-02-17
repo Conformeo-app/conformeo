@@ -44,3 +44,5 @@ export function AccountScreen() {
   );
 }
 
+// Dev guardrail: used by navigation wiring assertions.
+(AccountScreen as any).screenKey = 'ACCOUNT';

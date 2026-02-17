@@ -1,0 +1,74 @@
+{
+  "nav": {
+    "dashboard": "Tableau de bord",
+    "projects": "Chantiers",
+    "equipment": "Équipements",
+    "planning": "Planning",
+    "team": "Équipe",
+    "security": "Sécurité",
+    "enterprise": "Entreprise",
+    "account": "Compte"
+  },
+  "common": {
+    "close": "Fermer",
+    "cancel": "Annuler",
+    "refresh": "Rafraîchir",
+    "search": "Rechercher",
+    "open": "Ouvrir",
+    "retry": "Réessayer",
+    "save": "Enregistrer",
+    "delete": "Supprimer",
+    "offline": "Hors ligne",
+    "online": "En ligne"
+  },
+  "sync": {
+    "label": "Synchronisation",
+    "ok": "OK",
+    "offline": "Hors ligne",
+    "pending": "En attente",
+    "failed": "Échec",
+    "inProgress": "En cours",
+    "queue": "File"
+  },
+  "media": {
+    "upload": "Téléversement",
+    "status": {
+      "pending": "En attente",
+      "uploading": "En cours",
+      "uploaded": "Envoyé",
+      "failed": "Échec"
+    }
+  },
+  "tasks": {
+    "status": {
+      "todo": "À faire",
+      "doing": "En cours",
+      "done": "Terminée",
+      "blocked": "Bloquée"
+    },
+    "priority": {
+      "low": "Faible",
+      "medium": "Moyenne",
+      "high": "Haute"
+    },
+    "safety": "Sécurité"
+  },
+  "plans": {
+    "pinStatus": {
+      "open": "Ouvert",
+      "done": "Fait",
+      "info": "Info"
+    },
+    "priority": {
+      "low": "Faible",
+      "medium": "Moyenne",
+      "high": "Haute"
+    }
+  },
+  "modules": {
+    "dashboard": "Tableau de bord",
+    "companyHub": "Espace entreprise",
+    "offline": "Hors ligne"
+  }
+}
+

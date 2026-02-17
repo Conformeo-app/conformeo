@@ -43,7 +43,7 @@ export function ProjectDetailScreen({ route, navigation }: Props) {
   const { status: syncStatus } = useSyncStatus();
   const { availableModules } = useEnabledModules();
 
-  const { projectId, tab } = route.params;
+  const { projectId, tab, mediaUploadStatus } = route.params;
 
   useEffect(() => {
     setCurrentContext({ projectId });
@@ -396,7 +396,7 @@ export function ProjectDetailScreen({ route, navigation }: Props) {
           name="MediaTab"
           options={{ title: 'Médias' }}
           children={({ route }) => (
-            <MediaScreen projectId={projectId} initialUploadStatus={route.params?.uploadStatus} />
+            <MediaScreen projectId={projectId} initialUploadStatus={route.params?.uploadStatus ?? mediaUploadStatus} />
           )}
         />
       ) : null}

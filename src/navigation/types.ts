@@ -9,13 +9,25 @@ export type RootDrawerParamList = {
   Security: undefined;
   Enterprise: undefined;
   Account: undefined;
+  ModuleDisabled: { moduleKey?: string; moduleLabel?: string; reason?: string } | undefined;
+  QuickActions: undefined;
+};
+
+export type RootStackParamList = {
+  Auth: undefined;
+  App: undefined;
+};
+
+export type AuthStackParamList = {
+  AuthAccess: undefined;
+  AdminMfaEnrollment: undefined;
 };
 
 export type ProjectsStackParamList = {
   ProjectsList: undefined;
   ProjectCreate: undefined;
   ProjectEdit: { projectId: string };
-  ProjectDetail: { projectId: string; tab?: ProjectTabKey };
+  ProjectDetail: { projectId: string; tab?: ProjectTabKey; mediaUploadStatus?: 'ALL' | 'PENDING' | 'FAILED' };
   WasteVolume: { projectId: string };
   Carbon: { projectId: string };
   Exports: { projectId: string };

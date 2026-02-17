@@ -7,10 +7,10 @@ import { Text } from './Text';
 type SyncPhase = 'idle' | 'syncing' | 'offline' | 'error';
 
 function toLabel(phase: SyncPhase) {
-  if (phase === 'syncing') return 'Sync en cours';
-  if (phase === 'offline') return 'Sync offline';
-  if (phase === 'error') return 'Sync erreur';
-  return 'Sync OK';
+  if (phase === 'syncing') return 'Synchronisation en cours';
+  if (phase === 'offline') return 'Synchronisation hors ligne';
+  if (phase === 'error') return 'Synchronisation en échec';
+  return 'Synchronisation OK';
 }
 
 function toColor(phase: SyncPhase) {
@@ -24,7 +24,7 @@ function formatLastResult(result: SyncRunResult | null) {
   if (!result) {
     return null;
   }
-  return `Push:${result.pushed} Retry:${result.failed} Dead:${result.dead}`;
+  return `Envoyés:${result.pushed} Retentatives:${result.failed} Terminaux:${result.dead}`;
 }
 
 export function SyncPill({
@@ -83,7 +83,7 @@ export function SyncPill({
       </Text>
       {lastSyncedAt ? (
         <Text variant="caption" style={{ color: colors.slate }}>
-          Derniere sync: {new Date(lastSyncedAt).toLocaleTimeString()}
+          Derniere synchronisation: {new Date(lastSyncedAt).toLocaleTimeString()}
         </Text>
       ) : null}
       {resultSummary ? (

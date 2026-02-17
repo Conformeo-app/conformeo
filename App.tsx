@@ -1,6 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import './src/i18n';
 import { AuthProvider } from './src/core/auth';
 import { AppRoot } from './src/AppRoot';
 

@@ -34,7 +34,7 @@ export function useGlobalSyncStatus(): GlobalSyncStatus {
 
       const [conflictsCount, failedUploadsCount] = await Promise.all([
         conflicts.getOpenCount(activeOrgId).catch(() => 0),
-        media.countFailedUploads().catch(() => 0)
+        media.countFailedUploads(activeOrgId).catch(() => 0)
       ]);
 
       if (cancelled) {
@@ -62,4 +62,3 @@ export function useGlobalSyncStatus(): GlobalSyncStatus {
     isOffline: status.phase === 'offline'
   };
 }
-

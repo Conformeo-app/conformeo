@@ -10,7 +10,8 @@ export const ROUTES = {
   SECURITY: 'Security',
   ENTERPRISE: 'Enterprise',
   ACCOUNT: 'Account',
-  QUICK_ACTIONS: 'QuickActions'
+  QUICK_ACTIONS: 'QuickActions',
+  MODULE_DISABLED: 'ModuleDisabled'
 } as const;
 
 export type DrawerRouteName = (typeof ROUTES)[keyof typeof ROUTES];
@@ -24,4 +25,3 @@ export function assertRoutesIntegrity() {
     throw new Error(`[routes] Doublons détectés dans ROUTES: ${values.join(', ')}`);
   }
 }
-

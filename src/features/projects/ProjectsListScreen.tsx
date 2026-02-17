@@ -485,3 +485,6 @@ export function ProjectsListScreen({ navigation }: Props) {
     </Screen>
   );
 }
+
+// Dev guardrail: used by navigation wiring assertions.
+(ProjectsListScreen as any).screenKey = 'PROJECTS_LIST';

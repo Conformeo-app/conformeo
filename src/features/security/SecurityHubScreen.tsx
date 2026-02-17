@@ -75,3 +75,6 @@ export function SecurityHubScreen({ navigation }: Props) {
     </Screen>
   );
 }
+
+// Dev guardrail: used by navigation wiring assertions.
+(SecurityHubScreen as any).screenKey = 'SECURITY_HUB';

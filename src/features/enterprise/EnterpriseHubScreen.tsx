@@ -57,3 +57,5 @@ export function EnterpriseHubScreen({ navigation }: Props) {
   );
 }
 
+// Dev guardrail: used by navigation wiring assertions.
+(EnterpriseHubScreen as any).screenKey = 'ENTERPRISE_HUB';

@@ -99,7 +99,7 @@ export const mediaUploadWorker = {
         uploaded += 1;
       } catch (error) {
         failed += 1;
-        const message = error instanceof Error ? error.message : 'Upload failed';
+        const message = error instanceof Error ? error.message : 'Téléversement impossible.';
         await media.markFailed(asset.id, message, {
           terminal: isTerminalUploadError(message)
         });

@@ -1,2 +1,1 @@
-export { AppNavigator } from '../navigation/AppNavigator';
-
+export { AppNavigator } from '../navigation/Navigation';

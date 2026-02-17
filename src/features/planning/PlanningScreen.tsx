@@ -457,3 +457,5 @@ export function PlanningScreen() {
   );
 }
 
+// Dev guardrail: used by navigation wiring assertions.
+(PlanningScreen as any).screenKey = 'PLANNING';

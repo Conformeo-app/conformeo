@@ -621,3 +621,5 @@ export function EquipmentScreen() {
   );
 }
 
+// Dev guardrail: used by navigation wiring assertions.
+(EquipmentScreen as any).screenKey = 'EQUIPMENT';

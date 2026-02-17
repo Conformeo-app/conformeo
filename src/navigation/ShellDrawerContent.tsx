@@ -2,44 +2,82 @@ import type { DrawerContentComponentProps } from '@react-navigation/drawer';
 import React, { useMemo } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { useAuth } from '../core/auth';
+import { flags } from '../data/feature-flags';
 import { useSyncStatus } from '../data/sync/useSyncStatus';
+import { useEnabledModules } from './EnabledModulesProvider';
 import { Badge } from '../ui/components/Badge';
 import { Text } from '../ui/components/Text';
 import { useTheme } from '../ui/theme/ThemeProvider';
 import { ROUTES } from './routes';
 
 const LABELS: Record<string, { label: string; hint: string }> = {
-  [ROUTES.DASHBOARD]: { label: 'Dashboard', hint: 'Synthèse chantier / entreprise' },
+  [ROUTES.DASHBOARD]: { label: 'Tableau de bord', hint: 'Synthèse chantier / entreprise' },
   [ROUTES.PROJECTS]: { label: 'Chantiers', hint: 'Liste + détail + onglets' },
   [ROUTES.EQUIPMENT]: { label: 'Équipements', hint: 'Matériel, mouvements, liaisons' },
   [ROUTES.PLANNING]: { label: 'Planning', hint: 'Calendrier + affectations' },
-  [ROUTES.TEAM]: { label: 'Équipe', hint: 'Membres & teams' },
-  [ROUTES.SECURITY]: { label: 'Sécurité', hint: 'MFA, sessions, audit, sync' },
+  [ROUTES.TEAM]: { label: 'Équipe', hint: 'Membres & équipes' },
+  [ROUTES.SECURITY]: { label: 'Sécurité', hint: 'MFA, sessions, audit, synchronisation' },
   [ROUTES.ENTERPRISE]: { label: 'Entreprise', hint: 'Paramètres, modules, offres' },
   [ROUTES.ACCOUNT]: { label: 'Compte', hint: 'Profil & déconnexion' }
 };
 
 function phaseLabel(phase: 'idle' | 'syncing' | 'offline' | 'error') {
-  if (phase === 'syncing') return 'Sync en cours';
-  if (phase === 'offline') return 'Offline';
-  if (phase === 'error') return 'Erreur';
+  if (phase === 'syncing') return 'En cours';
+  if (phase === 'offline') return 'Hors ligne';
+  if (phase === 'error') return 'Échec';
   return 'OK';
 }
 
 export function ShellDrawerContent(props: DrawerContentComponentProps) {
   const { colors, spacing, radii } = useTheme();
   const { user, activeOrgId, role } = useAuth();
+  const { availableModules } = useEnabledModules();
   const { status } = useSyncStatus();
 
   const activeRouteName = props.state.routes[props.state.index]?.name;
+
+  const galleryEnabled =
+    __DEV__ || (role === 'ADMIN' && flags.isEnabled('ui_gallery', { orgId: activeOrgId ?? undefined, fallback: false }));
+
+  const routeVisible = useMemo(() => {
+    const hasSecurity =
+      galleryEnabled ||
+      availableModules.includes('security') ||
+      availableModules.includes('search') ||
+      availableModules.includes('offline') ||
+      availableModules.includes('audit') ||
+      availableModules.includes('conflicts') ||
+      availableModules.includes('superadmin');
+
+    const hasEnterprise =
+      availableModules.includes('orgs') ||
+      availableModules.includes('company') ||
+      availableModules.includes('offers') ||
+      availableModules.includes('governance') ||
+      availableModules.includes('backup');
+
+    const enabled = new Map<string, boolean>([
+      [ROUTES.DASHBOARD, true],
+      [ROUTES.PROJECTS, true], // section "core"
+      [ROUTES.EQUIPMENT, availableModules.includes('equipment')],
+      [ROUTES.PLANNING, availableModules.includes('planning')],
+      [ROUTES.TEAM, availableModules.includes('orgs')],
+      [ROUTES.SECURITY, hasSecurity],
+      [ROUTES.ENTERPRISE, hasEnterprise],
+      [ROUTES.ACCOUNT, true]
+    ]);
+
+    return (name: string) => enabled.get(name) === true;
+  }, [availableModules, galleryEnabled]);
 
   const routes = useMemo(
     () =>
       props.state.routes
         .map((route) => route.name)
         .filter((name) => LABELS[name])
+        .filter((name) => routeVisible(name))
         .filter((name) => name !== ROUTES.ACCOUNT),
-    [props.state.routes]
+    [props.state.routes, routeVisible]
   );
 
   if (__DEV__) {
@@ -66,7 +104,7 @@ export function ShellDrawerContent(props: DrawerContentComponentProps) {
           <Badge
             tone={status.phase === 'error' ? 'danger' : status.phase === 'offline' ? 'warning' : status.phase === 'syncing' ? 'info' : 'success'}
             icon={status.phase === 'offline' ? 'wifi-off' : status.phase === 'error' ? 'alert-circle' : 'sync'}
-            label={`Sync ${phaseLabel(status.phase)} · file ${status.queueDepth}`}
+            label={`Synchronisation ${phaseLabel(status.phase)} · file ${status.queueDepth}`}
           />
         </View>
       </View>

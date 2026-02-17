@@ -657,10 +657,10 @@ export function MediaScreen({
 
   const tileSize = useMemo(() => {
     if (gridWidth <= 0) return 120;
-    const usable = gridWidth - spacing.md * 2 - spacing.sm * (columns - 1) - (split && detail.open ? panelWidth + spacing.md : 0);
+    const usable = gridWidth - spacing.md * 2 - spacing.sm * (columns - 1);
     const size = Math.max(96, Math.floor(usable / columns));
     return size;
-  }, [columns, detail.open, gridWidth, panelWidth, spacing.md, spacing.sm, split]);
+  }, [columns, gridWidth, spacing.md, spacing.sm]);
 
   const withBusy = useCallback(
     async (task: () => Promise<void>) => {
@@ -962,8 +962,7 @@ export function MediaScreen({
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{
           padding: spacing.md,
-          paddingBottom: spacing.lg,
-          paddingRight: split && detail.open ? panelWidth + spacing.md * 2 : spacing.md
+          paddingBottom: spacing.lg
         }}
         columnWrapperStyle={{ gap: spacing.sm }}
         key={String(columns)}
@@ -1036,15 +1035,10 @@ export function MediaScreen({
         <ScrollView style={{ width: 360, minHeight: 0 }} contentContainerStyle={{ paddingBottom: spacing.lg }} keyboardShouldPersistTaps="handled">
           {leftColumn}
         </ScrollView>
-        <View style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <View style={{ flex: 1, minHeight: 0 }}>
           {grid}
-
-          {detail.open ? (
-            <View style={{ position: 'absolute', top: spacing.md, right: spacing.md, bottom: spacing.md, width: panelWidth }}>
-              {detailPanel}
-            </View>
-          ) : null}
         </View>
+        {detail.open ? <View style={{ width: panelWidth, minHeight: 0 }}>{detailPanel}</View> : null}
       </View>
 
       {activeOrgId ? (
