@@ -1,37 +1,62 @@
+import * as Sharing from 'expo-sharing';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FlatList, Image, Pressable, ScrollView, TextInput, View } from 'react-native';
+import { FlatList, Image, Modal, Pressable, ScrollView, Share, TextInput, View, useWindowDimensions } from 'react-native';
 import { useAuth } from '../../core/auth';
-import { media, MediaAsset } from '../../data/media';
+import { flags } from '../../data/feature-flags';
+import type { ExportJob } from '../../data/exports';
+import { exportsDoe } from '../../data/exports';
+import type { ShareLink } from '../../data/external-sharing';
+import { share } from '../../data/external-sharing';
+import type { MediaAsset } from '../../data/media';
+import { media } from '../../data/media';
+import type { PlanPin } from '../../data/plans-annotations';
+import { plans } from '../../data/plans-annotations';
+import type { SignatureActor, SignatureRecord } from '../../data/signature-probante';
+import { sign } from '../../data/signature-probante';
+import { useSyncStatus } from '../../data/sync/useSyncStatus';
+import type { Task, TaskFilters } from '../../data/tasks';
+import { tasks } from '../../data/tasks';
 import {
-  documents,
   Document,
+  DocumentLink,
   DocumentScope,
   DocumentStatus,
   DocumentsListFilters,
   DocumentType,
   DocumentVersion,
-  LinkedEntity
+  LinkedEntity,
+  documents
 } from '../../data/documents';
-import { useSyncStatus } from '../../data/sync/useSyncStatus';
+import { useAppNavigationContext } from '../../navigation/contextStore';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
 import { Text } from '../../ui/components/Text';
 import { Screen } from '../../ui/layout/Screen';
 import { useTheme } from '../../ui/theme/ThemeProvider';
 import { SectionHeader } from '../common/SectionHeader';
+import { SignatureModal } from './SignatureModal';
 
 const DEMO_PROJECT_ID = 'chantier-conformeo-demo';
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 30;
 
-const SCOPES: DocumentScope[] = ['PROJECT', 'COMPANY'];
-const DOC_TYPES: DocumentType[] = ['PLAN', 'DOE', 'PV', 'REPORT', 'INTERNAL', 'OTHER'];
-const DOC_STATUSES: DocumentStatus[] = ['DRAFT', 'FINAL', 'SIGNED'];
-const LINKED_ENTITIES: LinkedEntity[] = ['TASK', 'PLAN_PIN', 'PROJECT', 'EXPORT'];
+type QuickFilter = 'ALL' | 'PLANS' | 'DOE_REPORTS' | 'PV' | 'SECURITY' | 'OTHER' | 'SIGNED' | 'LINKED_TASK';
 
-type DocumentPreview = {
-  thumbPath: string | null;
-  mime: string | null;
-};
+const QUICK_FILTERS: Array<{ key: QuickFilter; label: string }> = [
+  { key: 'ALL', label: 'Tous' },
+  { key: 'PLANS', label: 'Plans' },
+  { key: 'DOE_REPORTS', label: 'DOE / Rapports' },
+  { key: 'PV', label: 'PV' },
+  { key: 'SECURITY', label: 'Sécurité' },
+  { key: 'OTHER', label: 'Autres' },
+  { key: 'SIGNED', label: 'Signés' },
+  { key: 'LINKED_TASK', label: 'Liés à une tâche' }
+];
+
+type DetailState = { open: boolean; documentId: string | null };
+
+function normalizeText(value: string) {
+  return value.trim().replace(/\s+/g, ' ');
+}
 
 function parseTagsCsv(value: string) {
   return value
@@ -41,377 +66,443 @@ function parseTagsCsv(value: string) {
 }
 
 function formatBytes(size: number) {
+  if (!Number.isFinite(size) || size <= 0) return '—';
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function isImageMedia(asset: MediaAsset | null) {
-  if (!asset) return false;
-  return asset.mime === 'image/webp' || asset.mime === 'image/jpeg';
+function formatShortDate(value: string) {
+  const ts = Date.parse(value);
+  if (!Number.isFinite(ts)) return value;
+  return new Date(ts).toLocaleDateString('fr-FR');
 }
 
-function statusColor(status: DocumentStatus, colors: { amber: string; teal: string; mint: string }) {
-  if (status === 'DRAFT') return colors.amber;
-  if (status === 'FINAL') return colors.teal;
-  return colors.mint;
+function statusTint(status: DocumentStatus, palette: { amber: string; teal: string; mint: string }) {
+  if (status === 'DRAFT') return palette.amber;
+  if (status === 'FINAL') return palette.teal;
+  return palette.mint;
 }
 
-async function resolveDocumentPreview(document: Document): Promise<DocumentPreview> {
-  const versions = await documents.listVersions(document.id);
-  const active =
-    versions.find((version) => version.id === document.active_version_id) ??
-    versions.sort((left, right) => right.version_number - left.version_number)[0];
-
-  if (!active) {
-    return { thumbPath: null, mime: null };
-  }
-
-  const asset = await media.getById(active.file_asset_id);
-  if (!asset) {
-    return { thumbPath: null, mime: active.file_mime };
-  }
-
-  return {
-    thumbPath: asset.local_thumb_path || null,
-    mime: asset.mime
-  };
+function isPdfVersion(version: DocumentVersion | null) {
+  return Boolean(version && version.file_mime === 'application/pdf');
 }
 
-export function DocumentsScreen() {
+function TaskPickerModal({
+  visible,
+  projectId,
+  orgId,
+  onClose,
+  onPick
+}: {
+  visible: boolean;
+  projectId: string;
+  orgId: string;
+  onClose: () => void;
+  onPick: (task: Task) => void;
+}) {
   const { colors, spacing, radii } = useTheme();
-  const { activeOrgId, user } = useAuth();
-  const { status: syncStatus } = useSyncStatus();
-
-  const [scope, setScope] = useState<DocumentScope>('PROJECT');
-  const [statusFilter, setStatusFilter] = useState<DocumentStatus | 'ALL'>('ALL');
-  const [typeFilter, setTypeFilter] = useState<DocumentType | 'ALL'>('ALL');
-  const [page, setPage] = useState(0);
-
-  const [documentsList, setDocumentsList] = useState<Document[]>([]);
-  const [previews, setPreviews] = useState<Record<string, DocumentPreview>>({});
-
-  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
-  const [selectedVersions, setSelectedVersions] = useState<DocumentVersion[]>([]);
-  const [selectedLinks, setSelectedLinks] = useState<Array<{ id: string; linked_entity: LinkedEntity; linked_id: string; created_at: string }>>([]);
-  const [activeVersionMedia, setActiveVersionMedia] = useState<MediaAsset | null>(null);
-
-  const [createTitle, setCreateTitle] = useState('');
-  const [createType, setCreateType] = useState<DocumentType>('OTHER');
-  const [createStatus, setCreateStatus] = useState<DocumentStatus>('DRAFT');
-  const [createTags, setCreateTags] = useState('');
-  const [createDescription, setCreateDescription] = useState('');
-
-  const [editTitle, setEditTitle] = useState('');
-  const [editDescription, setEditDescription] = useState('');
-  const [editTags, setEditTags] = useState('');
-  const [editStatus, setEditStatus] = useState<DocumentStatus>('DRAFT');
-
-  const [linkEntity, setLinkEntity] = useState<LinkedEntity>('TASK');
-  const [linkEntityId, setLinkEntityId] = useState('');
-
-  const [loadingList, setLoadingList] = useState(false);
-  const [loadingDetail, setLoadingDetail] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [query, setQuery] = useState('');
+  const [items, setItems] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const hasNextPage = documentsList.length >= PAGE_SIZE;
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const filters: TaskFilters = { org_id: orgId, limit: 80, offset: 0 };
+      const cleaned = normalizeText(query);
+      const next = cleaned ? await tasks.searchByProject(projectId, cleaned, filters) : await tasks.listByProject(projectId, filters);
+      setItems(next);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Chargement tâches impossible.';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [orgId, projectId, query]);
 
   useEffect(() => {
-    documents.setActor(user?.id ?? null);
-  }, [user?.id]);
+    if (!visible) return;
+    void load();
+  }, [load, visible]);
 
-  const listFilters = useMemo<DocumentsListFilters>(
-    () => ({
-      org_id: activeOrgId ?? undefined,
-      status: statusFilter,
-      doc_type: typeFilter,
-      limit: PAGE_SIZE,
-      offset: page * PAGE_SIZE
-    }),
-    [activeOrgId, page, statusFilter, typeFilter]
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <Screen>
+        <Card style={{ flex: 1, minHeight: 0 }}>
+          <Text variant="h2">Lier à une tâche</Text>
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Rechercher (titre/desc)"
+            placeholderTextColor={colors.slate}
+            style={{
+              marginTop: spacing.md,
+              borderWidth: 1,
+              borderColor: colors.fog,
+              borderRadius: radii.md,
+              paddingVertical: spacing.sm,
+              paddingHorizontal: spacing.md,
+              backgroundColor: colors.white
+            }}
+          />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
+            <Button label="Rechercher" onPress={() => void load()} disabled={loading} />
+            <Button label="Fermer" kind="ghost" onPress={onClose} disabled={loading} />
+          </View>
+
+          {error ? (
+            <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
+              {error}
+            </Text>
+          ) : null}
+
+          <FlatList
+            data={items}
+            keyExtractor={(item) => item.id}
+            style={{ flex: 1, minHeight: 0, marginTop: spacing.md }}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingBottom: spacing.lg }}
+            renderItem={({ item }) => (
+              <Pressable
+                onPress={() => onPick(item)}
+                style={{
+                  borderWidth: 1,
+                  borderColor: colors.fog,
+                  borderRadius: radii.md,
+                  padding: spacing.md,
+                  backgroundColor: colors.white,
+                  marginBottom: spacing.sm
+                }}
+              >
+                <Text variant="bodyStrong" numberOfLines={1}>
+                  {item.title}
+                </Text>
+                <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }} numberOfLines={1}>
+                  {item.status} · {item.priority} · {item.id.slice(0, 6)}
+                </Text>
+              </Pressable>
+            )}
+            ListEmptyComponent={
+              <Text variant="caption" style={{ color: colors.slate }}>
+                {loading ? 'Chargement...' : 'Aucune tâche.'}
+              </Text>
+            }
+          />
+        </Card>
+      </Screen>
+    </Modal>
   );
+}
 
-  const refreshList = useCallback(async () => {
-    if (!activeOrgId) {
-      setDocumentsList([]);
-      setPreviews({});
-      return;
-    }
+function PinPickerModal({
+  visible,
+  projectId,
+  onClose,
+  onPick
+}: {
+  visible: boolean;
+  projectId: string;
+  onClose: () => void;
+  onPick: (pin: PlanPin) => void;
+}) {
+  const { colors, spacing, radii } = useTheme();
+  const [query, setQuery] = useState('');
+  const [items, setItems] = useState<PlanPin[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-    setLoadingList(true);
-
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      const nextDocuments = await documents.list(scope, scope === 'PROJECT' ? DEMO_PROJECT_ID : undefined, listFilters);
-      setDocumentsList(nextDocuments);
-
-      const previewEntries = await Promise.all(
-        nextDocuments.map(async (document) => {
-          const preview = await resolveDocumentPreview(document);
-          return [document.id, preview] as const;
-        })
-      );
-
-      setPreviews(Object.fromEntries(previewEntries));
-
-      if (selectedDocument && !nextDocuments.some((document) => document.id === selectedDocument.id)) {
-        setSelectedDocument(null);
-        setSelectedVersions([]);
-        setSelectedLinks([]);
-        setActiveVersionMedia(null);
-      }
-    } catch (listError) {
-      const message = listError instanceof Error ? listError.message : 'Chargement documents impossible.';
+      const next = await plans.listPinsByProject(projectId, { status: 'ALL', limit: 250, offset: 0 });
+      const cleaned = normalizeText(query).toLowerCase();
+      const filtered = cleaned
+        ? next.filter((pin) => (pin.label ?? '').toLowerCase().includes(cleaned) || pin.id.toLowerCase().includes(cleaned))
+        : next;
+      setItems(filtered.slice(0, 150));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Chargement pins impossible.';
       setError(message);
     } finally {
-      setLoadingList(false);
+      setLoading(false);
     }
-  }, [activeOrgId, listFilters, scope, selectedDocument]);
+  }, [projectId, query]);
 
-  const refreshDetail = useCallback(async (documentId: string) => {
-    setLoadingDetail(true);
+  useEffect(() => {
+    if (!visible) return;
+    void load();
+  }, [load, visible]);
 
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <Screen>
+        <Card style={{ flex: 1, minHeight: 0 }}>
+          <Text variant="h2">Lier à un point de plan</Text>
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Rechercher (label/id)"
+            placeholderTextColor={colors.slate}
+            style={{
+              marginTop: spacing.md,
+              borderWidth: 1,
+              borderColor: colors.fog,
+              borderRadius: radii.md,
+              paddingVertical: spacing.sm,
+              paddingHorizontal: spacing.md,
+              backgroundColor: colors.white
+            }}
+          />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
+            <Button label="Rechercher" onPress={() => void load()} disabled={loading} />
+            <Button label="Fermer" kind="ghost" onPress={onClose} disabled={loading} />
+          </View>
+
+          {error ? (
+            <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
+              {error}
+            </Text>
+          ) : null}
+
+          <FlatList
+            data={items}
+            keyExtractor={(item) => item.id}
+            style={{ flex: 1, minHeight: 0, marginTop: spacing.md }}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingBottom: spacing.lg }}
+            renderItem={({ item }) => (
+              <Pressable
+                onPress={() => onPick(item)}
+                style={{
+                  borderWidth: 1,
+                  borderColor: colors.fog,
+                  borderRadius: radii.md,
+                  padding: spacing.md,
+                  backgroundColor: colors.white,
+                  marginBottom: spacing.sm
+                }}
+              >
+                <Text variant="bodyStrong" numberOfLines={1}>
+                  {item.label || `Pin ${item.id.slice(0, 6)}`}
+                </Text>
+                <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }} numberOfLines={1}>
+                  Page {item.page_number} · {item.status} · {item.priority}
+                </Text>
+              </Pressable>
+            )}
+            ListEmptyComponent={
+              <Text variant="caption" style={{ color: colors.slate }}>
+                {loading ? 'Chargement...' : 'Aucun pin.'}
+              </Text>
+            }
+          />
+        </Card>
+      </Screen>
+    </Modal>
+  );
+}
+
+function ExportPickerModal({
+  visible,
+  projectId,
+  onClose,
+  onPick
+}: {
+  visible: boolean;
+  projectId: string;
+  onClose: () => void;
+  onPick: (job: ExportJob) => void;
+}) {
+  const { colors, spacing, radii } = useTheme();
+  const [items, setItems] = useState<ExportJob[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      const [doc, versions, links] = await Promise.all([
-        documents.getById(documentId),
-        documents.listVersions(documentId),
-        documents.listLinks(documentId)
-      ]);
-
-      if (!doc) {
-        setSelectedDocument(null);
-        setSelectedVersions([]);
-        setSelectedLinks([]);
-        setActiveVersionMedia(null);
-        return;
-      }
-
-      setSelectedDocument(doc);
-      setSelectedVersions(versions);
-      setSelectedLinks(links);
-      setEditTitle(doc.title);
-      setEditDescription(doc.description ?? '');
-      setEditTags(doc.tags.join(', '));
-      setEditStatus(doc.status);
-
-      const activeVersion =
-        versions.find((version) => version.id === doc.active_version_id) ??
-        versions.sort((left, right) => right.version_number - left.version_number)[0];
-
-      if (!activeVersion) {
-        setActiveVersionMedia(null);
-      } else {
-        const mediaAsset = await media.getById(activeVersion.file_asset_id);
-        setActiveVersionMedia(mediaAsset);
-      }
-    } catch (detailError) {
-      const message = detailError instanceof Error ? detailError.message : 'Chargement détail document impossible.';
+      const next = await exportsDoe.listByProject(projectId);
+      setItems(next.slice(0, 120));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Chargement exports impossible.';
       setError(message);
     } finally {
-      setLoadingDetail(false);
+      setLoading(false);
     }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!visible) return;
+    void load();
+  }, [load, visible]);
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <Screen>
+        <Card style={{ flex: 1, minHeight: 0 }}>
+          <Text variant="h2">Lier à un export</Text>
+          <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
+            Exports récents du chantier.
+          </Text>
+
+          {error ? (
+            <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
+              {error}
+            </Text>
+          ) : null}
+
+          <FlatList
+            data={items}
+            keyExtractor={(item) => item.id}
+            style={{ flex: 1, minHeight: 0, marginTop: spacing.md }}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingBottom: spacing.lg }}
+            renderItem={({ item }) => (
+              <Pressable
+                onPress={() => onPick(item)}
+                style={{
+                  borderWidth: 1,
+                  borderColor: colors.fog,
+                  borderRadius: radii.md,
+                  padding: spacing.md,
+                  backgroundColor: colors.white,
+                  marginBottom: spacing.sm
+                }}
+              >
+                <Text variant="bodyStrong" numberOfLines={1}>
+                  {item.type} · {item.status}
+                </Text>
+                <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }} numberOfLines={1}>
+                  {formatShortDate(item.created_at)} · {item.id.slice(0, 6)} · {item.size_bytes ? formatBytes(item.size_bytes) : '—'}
+                </Text>
+              </Pressable>
+            )}
+            ListEmptyComponent={
+              <Text variant="caption" style={{ color: colors.slate }}>
+                {loading ? 'Chargement...' : 'Aucun export.'}
+              </Text>
+            }
+          />
+
+          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+            <Button label="Fermer" kind="ghost" onPress={onClose} disabled={loading} />
+          </View>
+        </Card>
+      </Screen>
+    </Modal>
+  );
+}
+
+function NewDocumentModal({
+  visible,
+  orgId,
+  projectId,
+  createdBy,
+  onClose,
+  onCreated
+}: {
+  visible: boolean;
+  orgId: string;
+  projectId: string;
+  createdBy: string;
+  onClose: () => void;
+  onCreated: (documentId: string) => void;
+}) {
+  const { colors, spacing, radii } = useTheme();
+  const [title, setTitle] = useState('');
+  const [docType, setDocType] = useState<DocumentType>('OTHER');
+  const [tags, setTags] = useState('');
+  const [status, setStatus] = useState<DocumentStatus>('DRAFT');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reset = useCallback(() => {
+    setTitle('');
+    setDocType('OTHER');
+    setTags('');
+    setStatus('DRAFT');
+    setError(null);
   }, []);
 
   useEffect(() => {
-    void refreshList();
-  }, [refreshList]);
-
-  const createDocument = useCallback(async () => {
-    if (!activeOrgId || !user?.id) {
-      setError('Session invalide: utilisateur ou organisation absente.');
-      return;
+    if (!visible) {
+      reset();
     }
+  }, [reset, visible]);
 
-    setSubmitting(true);
-    setError(null);
+  const createBase = useCallback(async () => {
+    const created = await documents.create({
+      org_id: orgId,
+      scope: 'PROJECT',
+      project_id: projectId,
+      title,
+      doc_type: docType,
+      status,
+      tags: parseTagsCsv(tags),
+      created_by: createdBy
+    });
+    return created.id;
+  }, [createdBy, docType, orgId, projectId, status, tags, title]);
 
-    try {
-      const created = await documents.create({
-        org_id: activeOrgId,
-        scope,
-        project_id: scope === 'PROJECT' ? DEMO_PROJECT_ID : undefined,
-        title: createTitle,
-        doc_type: createType,
-        status: createStatus,
-        tags: parseTagsCsv(createTags),
-        description: createDescription,
-        created_by: user.id
-      });
-
-      setCreateTitle('');
-      setCreateTags('');
-      setCreateDescription('');
-      setCreateType('OTHER');
-      setCreateStatus('DRAFT');
-
-      await refreshList();
-      await refreshDetail(created.id);
-    } catch (createError) {
-      const message = createError instanceof Error ? createError.message : 'Création document impossible.';
-      setError(message);
-    } finally {
-      setSubmitting(false);
-    }
-  }, [
-    activeOrgId,
-    createDescription,
-    createStatus,
-    createTags,
-    createTitle,
-    createType,
-    refreshDetail,
-    refreshList,
-    scope,
-    user?.id
-  ]);
-
-  const updateDocument = useCallback(async () => {
-    if (!selectedDocument) {
-      return;
-    }
-
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      const updated = await documents.update(selectedDocument.id, {
-        title: editTitle,
-        description: editDescription,
-        tags: parseTagsCsv(editTags),
-        status: editStatus
-      });
-
-      await refreshList();
-      await refreshDetail(updated.id);
-    } catch (updateError) {
-      const message = updateError instanceof Error ? updateError.message : 'Mise à jour document impossible.';
-      setError(message);
-    } finally {
-      setSubmitting(false);
-    }
-  }, [editDescription, editStatus, editTags, editTitle, refreshDetail, refreshList, selectedDocument]);
-
-  const removeDocument = useCallback(async () => {
-    if (!selectedDocument) {
-      return;
-    }
-
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      await documents.softDelete(selectedDocument.id);
-      setSelectedDocument(null);
-      setSelectedVersions([]);
-      setSelectedLinks([]);
-      setActiveVersionMedia(null);
-      await refreshList();
-    } catch (deleteError) {
-      const message = deleteError instanceof Error ? deleteError.message : 'Suppression document impossible.';
-      setError(message);
-    } finally {
-      setSubmitting(false);
-    }
-  }, [refreshList, selectedDocument]);
-
-  const addVersion = useCallback(
-    async (source: 'import' | 'capture') => {
-      if (!selectedDocument) {
-        return;
-      }
-
-      setSubmitting(true);
+  const onCreateEmpty = useCallback(() => {
+    void (async () => {
+      setBusy(true);
       setError(null);
-
       try {
-        await documents.addVersion(selectedDocument.id, {
-          source,
-          tag: 'document_version'
-        });
-
-        await refreshList();
-        await refreshDetail(selectedDocument.id);
-      } catch (versionError) {
-        const message = versionError instanceof Error ? versionError.message : 'Ajout version impossible.';
-        setError(message);
+        const id = await createBase();
+        onCreated(id);
+        onClose();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Création document impossible.');
       } finally {
-        setSubmitting(false);
+        setBusy(false);
       }
-    },
-    [refreshDetail, refreshList, selectedDocument]
-  );
+    })();
+  }, [createBase, onClose, onCreated]);
 
-  const activateVersion = useCallback(
-    async (versionId: string) => {
-      if (!selectedDocument) {
-        return;
-      }
-
-      setSubmitting(true);
+  const onCreateAndImport = useCallback(() => {
+    void (async () => {
+      setBusy(true);
       setError(null);
-
       try {
-        await documents.setActiveVersion(selectedDocument.id, versionId);
-        await refreshList();
-        await refreshDetail(selectedDocument.id);
-      } catch (activationError) {
-        const message = activationError instanceof Error ? activationError.message : 'Activation version impossible.';
-        setError(message);
+        const id = await createBase();
+        try {
+          await documents.addVersion(id, { source: 'import', tag: 'document_version' });
+        } catch (versionError) {
+          // If the user cancels the document picker, keep the document and let them add a version later.
+          const message = versionError instanceof Error ? versionError.message : '';
+          if (!message.toLowerCase().includes('aucun fichier import')) {
+            throw versionError;
+          }
+        }
+        onCreated(id);
+        onClose();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Création/import impossible.');
       } finally {
-        setSubmitting(false);
+        setBusy(false);
       }
-    },
-    [refreshDetail, refreshList, selectedDocument]
-  );
-
-  const addLink = useCallback(async () => {
-    if (!selectedDocument) {
-      return;
-    }
-
-    const linkedId = linkEntityId.trim();
-    if (!linkedId) {
-      return;
-    }
-
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      await documents.link(selectedDocument.id, linkEntity, linkedId);
-      setLinkEntityId('');
-      await refreshDetail(selectedDocument.id);
-    } catch (linkError) {
-      const message = linkError instanceof Error ? linkError.message : 'Création du lien impossible.';
-      setError(message);
-    } finally {
-      setSubmitting(false);
-    }
-  }, [linkEntity, linkEntityId, refreshDetail, selectedDocument]);
+    })();
+  }, [createBase, onClose, onCreated]);
 
   return (
-    <Screen>
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: spacing.lg }}
-        keyboardShouldPersistTaps="handled"
-      >
-        <SectionHeader
-        title="Documents"
-        subtitle="Organisation offline-first, versions et liens inter-modules prêts pour DOE/signature."
-      />
-
-      <View style={{ gap: spacing.md }}>
-        <Card>
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <Screen>
+        <Card style={{ flex: 1, minHeight: 0 }}>
           <Text variant="h2">Nouveau document</Text>
           <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
-            Retrouvable en 10 secondes, même hors réseau.
+            Offline-first. Tu peux importer le fichier maintenant ou ajouter une version plus tard.
           </Text>
 
           <TextInput
-            value={createTitle}
-            onChangeText={setCreateTitle}
-            placeholder="Titre document"
+            value={title}
+            onChangeText={setTitle}
+            placeholder="Titre"
             placeholderTextColor={colors.slate}
             style={{
               borderWidth: 1,
@@ -424,51 +515,42 @@ export function DocumentsScreen() {
             }}
           />
 
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm }}>
-            {SCOPES.map((itemScope) => (
-              <Button
-                key={itemScope}
-                label={itemScope}
-                kind={scope === itemScope ? 'primary' : 'ghost'}
-                onPress={() => {
-                  setScope(itemScope);
-                  setPage(0);
-                }}
-                disabled={submitting}
-              />
-            ))}
-          </View>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: spacing.sm }}>
+          <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.sm }}>
+            Type
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: spacing.xs }}>
             <View style={{ flexDirection: 'row', gap: spacing.xs }}>
-              {DOC_TYPES.map((itemType) => (
+              {(['PLAN', 'DOE', 'REPORT', 'PV', 'OTHER'] as DocumentType[]).map((type) => (
                 <Button
-                  key={itemType}
-                  label={itemType}
-                  kind={createType === itemType ? 'primary' : 'ghost'}
-                  onPress={() => setCreateType(itemType)}
-                  disabled={submitting}
+                  key={type}
+                  label={type}
+                  kind={docType === type ? 'primary' : 'ghost'}
+                  onPress={() => setDocType(type)}
+                  disabled={busy}
                 />
               ))}
             </View>
           </ScrollView>
 
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm }}>
-            {DOC_STATUSES.map((itemStatus) => (
+          <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.sm }}>
+            Statut
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs }}>
+            {(['DRAFT', 'FINAL'] as DocumentStatus[]).map((value) => (
               <Button
-                key={itemStatus}
-                label={itemStatus}
-                kind={createStatus === itemStatus ? 'primary' : 'ghost'}
-                onPress={() => setCreateStatus(itemStatus)}
-                disabled={submitting}
+                key={value}
+                label={value}
+                kind={status === value ? 'primary' : 'ghost'}
+                onPress={() => setStatus(value)}
+                disabled={busy}
               />
             ))}
           </View>
 
           <TextInput
-            value={createTags}
-            onChangeText={setCreateTags}
-            placeholder="Tags (ex: sécurité, plan, lot_cvc)"
+            value={tags}
+            onChangeText={setTags}
+            placeholder="Tags (ex: securite, lot_cvc)"
             placeholderTextColor={colors.slate}
             style={{
               borderWidth: 1,
@@ -477,365 +559,987 @@ export function DocumentsScreen() {
               paddingHorizontal: spacing.md,
               paddingVertical: spacing.sm,
               backgroundColor: colors.white,
-              marginTop: spacing.sm
+              marginTop: spacing.md
             }}
           />
 
-          <TextInput
-            value={createDescription}
-            onChangeText={setCreateDescription}
-            placeholder="Description"
-            placeholderTextColor={colors.slate}
-            multiline
-            style={{
-              borderWidth: 1,
-              borderColor: colors.fog,
-              borderRadius: radii.md,
-              paddingHorizontal: spacing.md,
-              paddingVertical: spacing.sm,
-              backgroundColor: colors.white,
-              marginTop: spacing.sm,
-              minHeight: 64
-            }}
-          />
+          {error ? (
+            <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
+              {error}
+            </Text>
+          ) : null}
 
-          <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
-            <Button label="Créer document" onPress={() => void createDocument()} disabled={submitting} />
-            <Button label="Partager (MVP)" kind="ghost" disabled />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
+            <Button label="Importer fichier" onPress={onCreateAndImport} disabled={busy} />
+            <Button label="Créer sans fichier" kind="ghost" onPress={onCreateEmpty} disabled={busy} />
+            <Button label="Annuler" kind="ghost" onPress={onClose} disabled={busy} />
           </View>
         </Card>
+      </Screen>
+    </Modal>
+  );
+}
 
-        <Card>
-          <Text variant="bodyStrong">Filtres liste</Text>
+function DocumentDetailPanel({
+  document,
+  versions,
+  links,
+  signatures,
+  shareLinks,
+  activeAsset,
+  activeVersionNumber,
+  linkCount,
+  busy,
+  signatureEnabled,
+  sharingEnabled,
+  onClose,
+  onRefresh,
+  onAddVersionImport,
+  onAddVersionPhoto,
+  onActivateVersion,
+  onSetStatus,
+  onSoftDelete,
+  onOpenActiveFile,
+  onOpenTaskPicker,
+  onOpenPinPicker,
+  onOpenExportPicker,
+  onUnlink,
+  onCreateShareLink,
+  onRevokeShareLink,
+  onStartSignature
+}: {
+  document: Document | null;
+  versions: DocumentVersion[];
+  links: DocumentLink[];
+  signatures: SignatureRecord[];
+  shareLinks: ShareLink[];
+  activeAsset: MediaAsset | null;
+  activeVersionNumber: number | null;
+  linkCount: number;
+  busy: boolean;
+  signatureEnabled: boolean;
+  sharingEnabled: boolean;
+  onClose?: () => void;
+  onRefresh: () => void;
+  onAddVersionImport: () => void;
+  onAddVersionPhoto: () => void;
+  onActivateVersion: (versionId: string) => void;
+  onSetStatus: (status: DocumentStatus) => void;
+  onSoftDelete: () => void;
+  onOpenActiveFile: () => void;
+  onOpenTaskPicker: () => void;
+  onOpenPinPicker: () => void;
+  onOpenExportPicker: () => void;
+  onUnlink: (link: DocumentLink) => void;
+  onCreateShareLink: () => void;
+  onRevokeShareLink: (linkId: string) => void;
+  onStartSignature: (versionId: string) => void;
+}) {
+  const { colors, spacing, radii } = useTheme();
 
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm }}>
-            {(['ALL', ...DOC_STATUSES] as const).map((itemStatus) => (
-              <Button
-                key={itemStatus}
-                label={itemStatus}
-                kind={statusFilter === itemStatus ? 'primary' : 'ghost'}
-                onPress={() => {
-                  setStatusFilter(itemStatus);
-                  setPage(0);
-                }}
-                disabled={submitting}
-              />
-            ))}
-          </View>
+  if (!document) {
+    return (
+      <Card style={{ flex: 1, minHeight: 0 }}>
+        <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
+          <Text variant="h2">Détail</Text>
+          <Text variant="body" style={{ color: colors.slate, marginTop: spacing.sm }}>
+            Sélectionne un document dans la liste.
+          </Text>
+        </ScrollView>
+      </Card>
+    );
+  }
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: spacing.sm }}>
-            <View style={{ flexDirection: 'row', gap: spacing.xs }}>
-              {(['ALL', ...DOC_TYPES] as const).map((itemType) => (
-                <Button
-                  key={itemType}
-                  label={itemType}
-                  kind={typeFilter === itemType ? 'primary' : 'ghost'}
-                  onPress={() => {
-                    setTypeFilter(itemType);
-                    setPage(0);
-                  }}
-                  disabled={submitting}
-                />
-              ))}
-            </View>
-          </ScrollView>
+  const activeVersion =
+    versions.find((version) => version.id === document.active_version_id) ??
+    [...versions].sort((left, right) => right.version_number - left.version_number)[0] ??
+    null;
 
-          <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
-            <Button
-              label="Page précédente"
-              kind="ghost"
-              onPress={() => setPage((previous) => Math.max(0, previous - 1))}
-              disabled={page === 0 || submitting}
-            />
-            <Button
-              label="Page suivante"
-              kind="ghost"
-              onPress={() => setPage((previous) => previous + 1)}
-              disabled={!hasNextPage || submitting}
-            />
-            <Text variant="caption" style={{ color: colors.slate, alignSelf: 'center' }}>
-              Page {page + 1} • sync queue {syncStatus.queueDepth}
+  const canSign = signatureEnabled && isPdfVersion(activeVersion);
+
+  const statusColor = statusTint(document.status, { amber: colors.amber, teal: colors.teal, mint: colors.mint });
+
+  return (
+    <Card style={{ flex: 1, minHeight: 0 }}>
+      <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm, alignItems: 'flex-start' }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text variant="h2" numberOfLines={2}>
+              {document.title}
+            </Text>
+            <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }} numberOfLines={2}>
+              {document.doc_type} · maj {formatShortDate(document.updated_at)} · v{activeVersionNumber ?? '—'} · liens {linkCount}
             </Text>
           </View>
-        </Card>
 
-        <View style={{ gap: spacing.md }}>
-          <FlatList
-            data={documentsList}
-            keyExtractor={(item) => item.id}
-            scrollEnabled={false}
-            nestedScrollEnabled={false}
-            contentContainerStyle={{ gap: spacing.sm, paddingBottom: spacing.md }}
-            renderItem={({ item }) => {
-              const preview = previews[item.id];
-              const isActive = selectedDocument?.id === item.id;
-              const primaryTag = item.tags[0] ?? 'sans-tag';
+          <View style={{ alignItems: 'flex-end', gap: spacing.xs }}>
+            <View style={{ backgroundColor: statusColor, borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs }}>
+              <Text variant="caption">{document.status}</Text>
+            </View>
+            {onClose ? <Button label="Fermer" kind="ghost" onPress={onClose} disabled={busy} /> : null}
+          </View>
+        </View>
 
-              return (
-                <Pressable onPress={() => void refreshDetail(item.id)}>
-                  <Card
-                    style={{
-                      borderWidth: isActive ? 2 : 1,
-                      borderColor: isActive ? colors.teal : colors.fog
-                    }}
-                  >
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text variant="bodyStrong" numberOfLines={1}>
-                        {item.title}
-                      </Text>
-                      <View
-                        style={{
-                          backgroundColor: statusColor(item.status, colors),
-                          borderRadius: radii.pill,
-                          paddingHorizontal: spacing.sm,
-                          paddingVertical: spacing.xs
-                        }}
-                      >
-                        <Text variant="caption">{item.status}</Text>
-                      </View>
-                    </View>
-
-                    <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
-                      {item.doc_type} • tag {primaryTag} • {new Date(item.updated_at).toLocaleDateString('fr-FR')}
-                    </Text>
-
-                    {preview?.thumbPath ? (
-                      <Image
-                        source={{ uri: preview.thumbPath }}
-                        style={{ width: '100%', height: 86, borderRadius: radii.sm, marginTop: spacing.sm }}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View
-                        style={{
-                          width: '100%',
-                          height: 72,
-                          borderRadius: radii.sm,
-                          marginTop: spacing.sm,
-                          backgroundColor: colors.fog,
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
-                      >
-                        <Text variant="caption" style={{ color: colors.slate }}>
-                          {preview?.mime?.includes('pdf') ? 'PDF' : 'Aperçu indisponible'}
-                        </Text>
-                      </View>
-                    )}
-                  </Card>
-                </Pressable>
-              );
+        {activeAsset ? (
+          activeAsset.mime.startsWith('image/') && activeAsset.local_thumb_path ? (
+            <Image
+              source={{ uri: activeAsset.local_thumb_path }}
+              style={{ width: '100%', height: 120, borderRadius: radii.md, marginTop: spacing.md }}
+              resizeMode="cover"
+            />
+          ) : (
+            <View
+              style={{
+                width: '100%',
+                height: 96,
+                borderRadius: radii.md,
+                marginTop: spacing.md,
+                backgroundColor: colors.fog,
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <Text variant="caption" style={{ color: colors.slate }}>
+                Version active: {activeAsset.mime.toUpperCase()}
+              </Text>
+            </View>
+          )
+        ) : (
+          <View
+            style={{
+              width: '100%',
+              height: 72,
+              borderRadius: radii.md,
+              marginTop: spacing.md,
+              backgroundColor: colors.fog,
+              alignItems: 'center',
+              justifyContent: 'center'
             }}
-            ListEmptyComponent={
-              <Card>
-                <Text variant="body" style={{ color: colors.slate }}>
-                  {loadingList ? 'Chargement documents...' : 'Aucun document pour ce filtre.'}
-                </Text>
-              </Card>
-            }
-          />
+          >
+            <Text variant="caption" style={{ color: colors.slate }}>
+              Aucune version (fichier) pour ce document.
+            </Text>
+          </View>
+        )}
 
-          {selectedDocument ? (
-            <Card style={{ maxHeight: 400 }}>
-              <ScrollView>
-                <Text variant="h2">Détail document</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
+          <Button label="Rafraîchir" kind="ghost" onPress={onRefresh} disabled={busy} />
+          <Button label="Ajouter version (import)" onPress={onAddVersionImport} disabled={busy} />
+          <Button label="Ajouter version (photo)" kind="ghost" onPress={onAddVersionPhoto} disabled={busy} />
+          <Button label="Ouvrir fichier" kind="ghost" onPress={onOpenActiveFile} disabled={busy || !activeAsset} />
+        </View>
 
-                <TextInput
-                  value={editTitle}
-                  onChangeText={setEditTitle}
-                  placeholder="Titre"
-                  placeholderTextColor={colors.slate}
+        <Text variant="h2" style={{ marginTop: spacing.lg }}>
+          Statut
+        </Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
+          <Button label="DRAFT" kind={document.status === 'DRAFT' ? 'primary' : 'ghost'} onPress={() => onSetStatus('DRAFT')} disabled={busy} />
+          <Button label="FINAL" kind={document.status === 'FINAL' ? 'primary' : 'ghost'} onPress={() => onSetStatus('FINAL')} disabled={busy} />
+          <Button label="Supprimer (soft)" kind="ghost" onPress={onSoftDelete} disabled={busy} />
+        </View>
+
+        <Text variant="h2" style={{ marginTop: spacing.lg }}>
+          Versions
+        </Text>
+        <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+          {versions.length === 0 ? (
+            <Text variant="caption" style={{ color: colors.slate }}>
+              Aucune version.
+            </Text>
+          ) : (
+            versions.map((version) => {
+              const isActive = document.active_version_id === version.id;
+              return (
+                <View
+                  key={version.id}
                   style={{
                     borderWidth: 1,
-                    borderColor: colors.fog,
+                    borderColor: isActive ? colors.teal : colors.fog,
                     borderRadius: radii.md,
-                    paddingHorizontal: spacing.md,
-                    paddingVertical: spacing.sm,
-                    backgroundColor: colors.white,
-                    marginTop: spacing.sm
+                    padding: spacing.md
                   }}
-                />
-
-                <TextInput
-                  value={editDescription}
-                  onChangeText={setEditDescription}
-                  placeholder="Description"
-                  placeholderTextColor={colors.slate}
-                  multiline
-                  style={{
-                    borderWidth: 1,
-                    borderColor: colors.fog,
-                    borderRadius: radii.md,
-                    paddingHorizontal: spacing.md,
-                    paddingVertical: spacing.sm,
-                    backgroundColor: colors.white,
-                    marginTop: spacing.sm,
-                    minHeight: 64
-                  }}
-                />
-
-                <TextInput
-                  value={editTags}
-                  onChangeText={setEditTags}
-                  placeholder="Tags"
-                  placeholderTextColor={colors.slate}
-                  style={{
-                    borderWidth: 1,
-                    borderColor: colors.fog,
-                    borderRadius: radii.md,
-                    paddingHorizontal: spacing.md,
-                    paddingVertical: spacing.sm,
-                    backgroundColor: colors.white,
-                    marginTop: spacing.sm
-                  }}
-                />
-
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm }}>
-                  {DOC_STATUSES.map((itemStatus) => (
-                    <Button
-                      key={itemStatus}
-                      label={itemStatus}
-                      kind={editStatus === itemStatus ? 'primary' : 'ghost'}
-                      onPress={() => setEditStatus(itemStatus)}
-                      disabled={submitting || loadingDetail}
-                    />
-                  ))}
-                </View>
-
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
-                  <Button label="Enregistrer meta" onPress={() => void updateDocument()} disabled={submitting || loadingDetail} />
-                  <Button label="Supprimer (soft)" kind="ghost" onPress={() => void removeDocument()} disabled={submitting || loadingDetail} />
-                  <Button label="Partager (MVP)" kind="ghost" disabled />
-                </View>
-
-                <View style={{ marginTop: spacing.md }}>
-                  <Text variant="bodyStrong">Versions</Text>
-                  <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
-                    <Button label="Ajouter version (import)" onPress={() => void addVersion('import')} disabled={submitting || loadingDetail} />
-                    <Button label="Ajouter version (photo)" kind="ghost" onPress={() => void addVersion('capture')} disabled={submitting || loadingDetail} />
-                  </View>
-
-                  {activeVersionMedia ? (
-                    isImageMedia(activeVersionMedia) && activeVersionMedia.local_thumb_path ? (
-                      <Image
-                        source={{ uri: activeVersionMedia.local_thumb_path }}
-                        style={{ width: '100%', height: 96, borderRadius: radii.sm, marginTop: spacing.sm }}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View
-                        style={{
-                          width: '100%',
-                          height: 72,
-                          borderRadius: radii.sm,
-                          marginTop: spacing.sm,
-                          backgroundColor: colors.fog,
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
-                      >
-                        <Text variant="caption" style={{ color: colors.slate }}>
-                          Version active: {activeVersionMedia.mime.toUpperCase()}
-                        </Text>
-                      </View>
-                    )
-                  ) : null}
-
-                  <View style={{ gap: spacing.xs, marginTop: spacing.sm }}>
-                    {selectedVersions.map((version) => (
-                      <View
-                        key={version.id}
-                        style={{
-                          borderWidth: 1,
-                          borderColor:
-                            selectedDocument.active_version_id === version.id ? colors.teal : colors.fog,
-                          borderRadius: radii.md,
-                          padding: spacing.sm
-                        }}
-                      >
-                        <Text variant="caption">
-                          v{version.version_number} • {version.file_mime} • {formatBytes(version.file_size)}
-                        </Text>
-                        <Text variant="caption" style={{ color: colors.slate }} numberOfLines={1}>
-                          hash: {version.file_hash}
-                        </Text>
-                        <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs }}>
-                          <Button
-                            label="Activer"
-                            kind="ghost"
-                            onPress={() => void activateVersion(version.id)}
-                            disabled={selectedDocument.active_version_id === version.id || submitting || loadingDetail}
-                          />
-                        </View>
-                      </View>
-                    ))}
-                    {selectedVersions.length === 0 ? (
-                      <Text variant="caption" style={{ color: colors.slate }}>
-                        Aucune version pour ce document.
-                      </Text>
+                >
+                  <Text variant="bodyStrong" numberOfLines={1}>
+                    v{version.version_number} · {version.file_mime} · {formatBytes(version.file_size)}
+                  </Text>
+                  <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }} numberOfLines={1}>
+                    {formatShortDate(version.created_at)} · {version.id.slice(0, 6)}
+                  </Text>
+                  <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }} numberOfLines={1}>
+                    hash: {version.file_hash}
+                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
+                    <Button label="Activer" kind="ghost" onPress={() => onActivateVersion(version.id)} disabled={busy || isActive} />
+                    {signatureEnabled && version.file_mime === 'application/pdf' ? (
+                      <Button label="Signer" kind="ghost" onPress={() => onStartSignature(version.id)} disabled={busy} />
                     ) : null}
                   </View>
                 </View>
+              );
+            })
+          )}
+        </View>
 
-                <View style={{ marginTop: spacing.md }}>
-                  <Text variant="bodyStrong">Liens inter-modules</Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm }}>
-                    {LINKED_ENTITIES.map((entity) => (
-                      <Button
-                        key={entity}
-                        label={entity}
-                        kind={linkEntity === entity ? 'primary' : 'ghost'}
-                        onPress={() => setLinkEntity(entity)}
-                        disabled={submitting || loadingDetail}
-                      />
-                    ))}
-                  </View>
+        <Text variant="h2" style={{ marginTop: spacing.lg }}>
+          Liens
+        </Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
+          <Button label="Lier à une tâche" onPress={onOpenTaskPicker} disabled={busy} />
+          <Button label="Lier à un pin" kind="ghost" onPress={onOpenPinPicker} disabled={busy} />
+          <Button label="Lier à un export" kind="ghost" onPress={onOpenExportPicker} disabled={busy} />
+        </View>
+        <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+          {links.length === 0 ? (
+            <Text variant="caption" style={{ color: colors.slate }}>
+              Aucun lien.
+            </Text>
+          ) : (
+            links.map((link) => (
+              <View
+                key={link.id}
+                style={{
+                  borderWidth: 1,
+                  borderColor: colors.fog,
+                  borderRadius: radii.md,
+                  padding: spacing.md
+                }}
+              >
+                <Text variant="bodyStrong" numberOfLines={1}>
+                  {link.linked_entity} · {link.linked_id}
+                </Text>
+                <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }} numberOfLines={1}>
+                  {formatShortDate(link.created_at)}
+                </Text>
+                <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
+                  <Button label="Supprimer lien" kind="ghost" onPress={() => onUnlink(link)} disabled={busy} />
+                </View>
+              </View>
+            ))
+          )}
+        </View>
 
-                  <TextInput
-                    value={linkEntityId}
-                    onChangeText={setLinkEntityId}
-                    placeholder="Identifiant entité liée"
-                    placeholderTextColor={colors.slate}
+        {signatureEnabled ? (
+          <>
+            <Text variant="h2" style={{ marginTop: spacing.lg }}>
+              Signature probante
+            </Text>
+            <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Une signature génère un PDF signé + un reçu, et passe le document en SIGNED.
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
+              <Button label="Signer la version active" onPress={() => activeVersion && onStartSignature(activeVersion.id)} disabled={busy || !canSign} />
+            </View>
+            <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+              {signatures.length === 0 ? (
+                <Text variant="caption" style={{ color: colors.slate }}>
+                  Aucune signature.
+                </Text>
+              ) : (
+                signatures.slice(0, 6).map((row) => (
+                  <View
+                    key={row.id}
                     style={{
                       borderWidth: 1,
                       borderColor: colors.fog,
                       borderRadius: radii.md,
-                      paddingHorizontal: spacing.md,
-                      paddingVertical: spacing.sm,
-                      backgroundColor: colors.white,
-                      marginTop: spacing.sm
+                      padding: spacing.md
                     }}
-                  />
-
-                  <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
-                    <Button label="Créer lien" onPress={() => void addLink()} disabled={submitting || loadingDetail} />
+                  >
+                    <Text variant="caption" style={{ color: colors.slate }} numberOfLines={1}>
+                      {row.status} · local {row.signed_at_local ? formatShortDate(row.signed_at_local) : '—'}
+                    </Text>
+                    <Text variant="caption" style={{ color: colors.slate }} numberOfLines={1}>
+                      hash: {row.file_hash || '—'}
+                    </Text>
                   </View>
+                ))
+              )}
+            </View>
+          </>
+        ) : null}
 
-                  <View style={{ gap: spacing.xs, marginTop: spacing.sm }}>
-                    {selectedLinks.map((link) => (
-                      <Text key={link.id} variant="caption" style={{ color: colors.slate }}>
-                        {link.linked_entity} • {link.linked_id}
-                      </Text>
-                    ))}
-                    {selectedLinks.length === 0 ? (
+        {sharingEnabled ? (
+          <>
+            <Text variant="h2" style={{ marginTop: spacing.lg }}>
+              Partage externe
+            </Text>
+            <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Génère un lien temporaire en lecture seule (réseau requis).
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
+              <Button label="Créer lien (72h)" onPress={onCreateShareLink} disabled={busy} />
+            </View>
+            <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+              {shareLinks.length === 0 ? (
+                <Text variant="caption" style={{ color: colors.slate }}>
+                  Aucun lien.
+                </Text>
+              ) : (
+                shareLinks.map((link) => {
+                  const expired = Date.parse(link.expires_at) <= Date.now();
+                  const revoked = Boolean(link.revoked_at);
+                  const status = revoked ? 'REVOQUÉ' : expired ? 'EXPIRÉ' : 'ACTIF';
+                  return (
+                    <View
+                      key={link.id}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: colors.fog,
+                        borderRadius: radii.md,
+                        padding: spacing.md
+                      }}
+                    >
                       <Text variant="caption" style={{ color: colors.slate }}>
-                        Aucun lien pour ce document.
+                        {status} · expire {new Date(link.expires_at).toLocaleString('fr-FR')}
                       </Text>
-                    ) : null}
-                  </View>
-                </View>
-              </ScrollView>
-            </Card>
-          ) : null}
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
+                        {link.public_url ? (
+                          <Button
+                            label="Partager lien"
+                            kind="ghost"
+                            onPress={() => {
+                              void Share.share({ message: link.public_url! }).catch(() => {
+                                // no-op
+                              });
+                            }}
+                            disabled={busy}
+                          />
+                        ) : (
+                          <Text variant="caption" style={{ color: colors.slate }}>
+                            Token non dispo sur ce device.
+                          </Text>
+                        )}
+                        {!revoked && !expired ? (
+                          <Button label="Révoquer" kind="ghost" onPress={() => onRevokeShareLink(link.id)} disabled={busy} />
+                        ) : null}
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+            </View>
+          </>
+        ) : null}
+      </ScrollView>
+    </Card>
+  );
+}
+
+export function DocumentsScreen({ projectId }: { projectId?: string } = {}) {
+  const { colors, spacing, radii } = useTheme();
+  const { width } = useWindowDimensions();
+  const split = width >= 980;
+
+  const { activeOrgId, user } = useAuth();
+  const navCtx = useAppNavigationContext();
+  const { status: syncStatus } = useSyncStatus();
+
+  const effectiveProjectId = projectId ?? navCtx.projectId ?? DEMO_PROJECT_ID;
+
+  const signatureEnabled = useMemo(
+    () => flags.isEnabled('signature-probante', { orgId: activeOrgId ?? undefined, fallback: false }),
+    [activeOrgId]
+  );
+  const sharingEnabled = useMemo(
+    () => flags.isEnabled('external-sharing', { orgId: activeOrgId ?? undefined, fallback: false }),
+    [activeOrgId]
+  );
+
+  const [filter, setFilter] = useState<QuickFilter>('ALL');
+  const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+
+  const [items, setItems] = useState<Document[]>([]);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [listBusy, setListBusy] = useState(false);
+  const [detailBusy, setDetailBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [activeVersionNumbers, setActiveVersionNumbers] = useState<Record<string, number | null>>({});
+  const [linkCounts, setLinkCounts] = useState<Record<string, number>>({});
+
+  const [detail, setDetail] = useState<DetailState>({ open: false, documentId: null });
+  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
+  const [selectedVersions, setSelectedVersions] = useState<DocumentVersion[]>([]);
+  const [selectedLinks, setSelectedLinks] = useState<DocumentLink[]>([]);
+  const [selectedSignatures, setSelectedSignatures] = useState<SignatureRecord[]>([]);
+  const [selectedShareLinks, setSelectedShareLinks] = useState<ShareLink[]>([]);
+  const [activeAsset, setActiveAsset] = useState<MediaAsset | null>(null);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [taskPickerOpen, setTaskPickerOpen] = useState(false);
+  const [pinPickerOpen, setPinPickerOpen] = useState(false);
+  const [exportPickerOpen, setExportPickerOpen] = useState(false);
+
+  const [signatureModalOpen, setSignatureModalOpen] = useState(false);
+  const [signatureTargetVersionId, setSignatureTargetVersionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedQuery(normalizeText(query)), 250);
+    return () => clearTimeout(handle);
+  }, [query]);
+
+  useEffect(() => {
+    documents.setActor(user?.id ?? null);
+    plans.setContext({ org_id: activeOrgId ?? undefined, user_id: user?.id ?? undefined });
+    exportsDoe.setContext({ org_id: activeOrgId ?? undefined, user_id: user?.id ?? undefined });
+    share.setContext({ org_id: activeOrgId ?? undefined, user_id: user?.id ?? undefined });
+  }, [activeOrgId, user?.id]);
+
+  const buildFilters = useCallback(
+    (pageOffset: number) => {
+      const base: DocumentsListFilters = {
+        org_id: activeOrgId ?? undefined,
+        include_deleted: false,
+        limit: PAGE_SIZE,
+        offset: pageOffset
+      };
+
+      if (filter === 'PLANS') {
+        base.doc_type = 'PLAN';
+      } else if (filter === 'DOE_REPORTS') {
+        base.doc_types = ['DOE', 'REPORT'];
+      } else if (filter === 'PV') {
+        base.doc_type = 'PV';
+      } else if (filter === 'SECURITY') {
+        base.tags = ['securite'];
+      } else if (filter === 'OTHER') {
+        base.doc_type = 'OTHER';
+      } else if (filter === 'SIGNED') {
+        base.status = 'SIGNED';
+      } else if (filter === 'LINKED_TASK') {
+        base.linked_entity = 'TASK';
+      }
+
+      return base;
+    },
+    [activeOrgId, filter]
+  );
+
+  const loadPage = useCallback(
+    async (mode: 'reset' | 'more') => {
+      if (!activeOrgId) {
+        setItems([]);
+        setOffset(0);
+        setHasMore(false);
+        setActiveVersionNumbers({});
+        setLinkCounts({});
+        return;
+      }
+
+      const nextOffset = mode === 'more' ? offset : 0;
+      if (mode === 'more' && (!hasMore || listBusy)) {
+        return;
+      }
+
+      setListBusy(true);
+      setError(null);
+
+      try {
+        const filters = buildFilters(nextOffset);
+        const pageItems =
+          debouncedQuery.length > 0
+            ? await documents.searchByProject(effectiveProjectId, debouncedQuery, filters)
+            : await documents.listByProject(effectiveProjectId, filters);
+
+        setHasMore(pageItems.length >= PAGE_SIZE);
+        setOffset(nextOffset + PAGE_SIZE);
+
+        setItems((prev) => {
+          if (mode === 'reset') {
+            return pageItems;
+          }
+
+          const byId = new Map(prev.map((doc) => [doc.id, doc] as const));
+          for (const doc of pageItems) {
+            byId.set(doc.id, doc);
+          }
+          return Array.from(byId.values()).sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+        });
+
+        const ids = pageItems.map((doc) => doc.id);
+        if (ids.length > 0) {
+          const [versionsMap, linksMap] = await Promise.all([
+            documents.getActiveVersionNumbers(ids),
+            documents.getLinkCounts(ids)
+          ]);
+
+          setActiveVersionNumbers((prev) => ({ ...prev, ...versionsMap }));
+          setLinkCounts((prev) => ({ ...prev, ...linksMap }));
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Chargement documents impossible.');
+      } finally {
+        setListBusy(false);
+      }
+    },
+    [activeOrgId, buildFilters, debouncedQuery, effectiveProjectId, hasMore, listBusy, offset]
+  );
+
+  useEffect(() => {
+    setOffset(0);
+    setHasMore(true);
+    void loadPage('reset');
+  }, [activeOrgId, debouncedQuery, effectiveProjectId, filter, loadPage]);
+
+  const refreshDetail = useCallback(
+    async (documentId: string) => {
+      setDetailBusy(true);
+      setError(null);
+
+      try {
+        const [doc, versions, links] = await Promise.all([
+          documents.getById(documentId),
+          documents.listVersions(documentId),
+          documents.listLinks(documentId)
+        ]);
+
+        if (!doc) {
+          setSelectedDocument(null);
+          setSelectedVersions([]);
+          setSelectedLinks([]);
+          setSelectedSignatures([]);
+          setSelectedShareLinks([]);
+          setActiveAsset(null);
+          return;
+        }
+
+        setSelectedDocument(doc);
+        setSelectedVersions(versions);
+        setSelectedLinks(links);
+
+        if (signatureEnabled) {
+          const rows = await sign.getByDocument(doc.id);
+          setSelectedSignatures(rows);
+        } else {
+          setSelectedSignatures([]);
+        }
+
+        if (sharingEnabled) {
+          const rows = await share.list('DOCUMENT', doc.id);
+          setSelectedShareLinks(rows);
+        } else {
+          setSelectedShareLinks([]);
+        }
+
+        const activeVersion =
+          versions.find((version) => version.id === doc.active_version_id) ??
+          [...versions].sort((left, right) => right.version_number - left.version_number)[0] ??
+          null;
+
+        if (!activeVersion) {
+          setActiveAsset(null);
+        } else {
+          const asset = await media.getById(activeVersion.file_asset_id);
+          setActiveAsset(asset);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Chargement détail impossible.');
+      } finally {
+        setDetailBusy(false);
+      }
+    },
+    [sharingEnabled, signatureEnabled]
+  );
+
+  const openDetail = useCallback(
+    (documentId: string) => {
+      setDetail({ open: true, documentId });
+      void refreshDetail(documentId);
+    },
+    [refreshDetail]
+  );
+
+  const closeDetail = useCallback(() => {
+    setDetail({ open: false, documentId: null });
+    setTaskPickerOpen(false);
+    setPinPickerOpen(false);
+    setExportPickerOpen(false);
+  }, []);
+
+  const withDetailBusy = useCallback(
+    async (task: () => Promise<void>) => {
+      setDetailBusy(true);
+      setError(null);
+      try {
+        await task();
+        if (selectedDocument) {
+          await refreshDetail(selectedDocument.id);
+        }
+        await loadPage('reset');
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Action impossible.');
+      } finally {
+        setDetailBusy(false);
+      }
+    },
+    [loadPage, refreshDetail, selectedDocument]
+  );
+
+  const selectedActiveVersionNumber = selectedDocument ? activeVersionNumbers[selectedDocument.id] ?? null : null;
+  const selectedLinkCount = selectedDocument ? linkCounts[selectedDocument.id] ?? selectedLinks.length : selectedLinks.length;
+
+  const header = (
+    <View style={{ gap: spacing.md }}>
+      <SectionHeader title="Documents" subtitle="Offline-first, versioning + liens, prêt pour DOE / signature." />
+
+      <Card>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, alignItems: 'center' }}>
+          <Button label="+ Document" onPress={() => setCreateOpen(true)} disabled={listBusy || !activeOrgId || !user?.id} />
+          <Button label="Rafraîchir" kind="ghost" onPress={() => void loadPage('reset')} disabled={listBusy} />
+          <Text variant="caption" style={{ color: colors.slate, alignSelf: 'center' }}>
+            {syncStatus.phase === 'offline' ? 'Offline' : 'Online'} · sync queue {syncStatus.queueDepth}
+          </Text>
+        </View>
+
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Rechercher (titre/tags)"
+          placeholderTextColor={colors.slate}
+          style={{
+            marginTop: spacing.md,
+            borderWidth: 1,
+            borderColor: colors.fog,
+            borderRadius: radii.md,
+            paddingVertical: spacing.sm,
+            paddingHorizontal: spacing.md,
+            backgroundColor: colors.white
+          }}
+        />
+
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm }}>
+          {QUICK_FILTERS.map((item) => (
+            <Button
+              key={item.key}
+              label={item.label}
+              kind={filter === item.key ? 'primary' : 'ghost'}
+              onPress={() => setFilter(item.key)}
+              disabled={listBusy}
+            />
+          ))}
         </View>
 
         {error ? (
-          <Text variant="caption" style={{ color: colors.rose }}>
+          <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
             {error}
           </Text>
         ) : null}
+      </Card>
+    </View>
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: Document }) => {
+      const isActive = selectedDocument?.id === item.id;
+      const linkCount = linkCounts[item.id] ?? 0;
+      const v = activeVersionNumbers[item.id];
+      const statusColor = statusTint(item.status, { amber: colors.amber, teal: colors.teal, mint: colors.mint });
+
+      return (
+        <Pressable onPress={() => openDetail(item.id)}>
+          <Card
+            style={{
+              borderWidth: isActive ? 2 : 1,
+              borderColor: isActive ? colors.teal : colors.fog,
+              padding: spacing.md
+            }}
+          >
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm, alignItems: 'flex-start' }}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text variant="bodyStrong" numberOfLines={1}>
+                  {item.title}
+                </Text>
+                <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }} numberOfLines={2}>
+                  {item.doc_type} · v{v ?? '—'} · liens {linkCount} · maj {formatShortDate(item.updated_at)}
+                </Text>
+              </View>
+              <View style={{ backgroundColor: statusColor, borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs }}>
+                <Text variant="caption">{item.status}</Text>
+              </View>
+            </View>
+          </Card>
+        </Pressable>
+      );
+    },
+    [activeVersionNumbers, colors.amber, colors.fog, colors.mint, colors.slate, colors.teal, linkCounts, openDetail, radii.pill, selectedDocument?.id, spacing.md, spacing.sm, spacing.xs]
+  );
+
+  const list = (
+    <FlatList
+      data={items}
+      keyExtractor={(item) => item.id}
+      renderItem={renderItem}
+      keyboardShouldPersistTaps="handled"
+      style={{ flex: 1, minHeight: 0 }}
+      contentContainerStyle={{ gap: spacing.sm, paddingBottom: spacing.lg }}
+      ListHeaderComponent={header}
+      ListFooterComponent={
+        hasMore ? (
+          <View style={{ marginTop: spacing.md }}>
+            <Button label={listBusy ? 'Chargement…' : 'Charger plus'} kind="ghost" onPress={() => void loadPage('more')} disabled={listBusy} />
+          </View>
+        ) : (
+          <View style={{ marginTop: spacing.md }}>
+            <Text variant="caption" style={{ color: colors.slate }}>
+              Fin de liste.
+            </Text>
+          </View>
+        )
+      }
+      ListEmptyComponent={
+        <Card>
+          <Text variant="body" style={{ color: colors.slate }}>
+            {listBusy ? 'Chargement…' : 'Aucun document.'}
+          </Text>
+        </Card>
+      }
+    />
+  );
+
+  const detailPanel = (
+    <DocumentDetailPanel
+      document={selectedDocument}
+      versions={selectedVersions}
+      links={selectedLinks}
+      signatures={selectedSignatures}
+      shareLinks={selectedShareLinks}
+      activeAsset={activeAsset}
+      activeVersionNumber={selectedActiveVersionNumber}
+      linkCount={selectedLinkCount}
+      busy={detailBusy || listBusy}
+      signatureEnabled={signatureEnabled}
+      sharingEnabled={sharingEnabled}
+      onClose={split ? undefined : closeDetail}
+      onRefresh={() => selectedDocument && void refreshDetail(selectedDocument.id)}
+      onAddVersionImport={() =>
+        selectedDocument &&
+        void withDetailBusy(async () => {
+          await documents.addVersion(selectedDocument.id, { source: 'import', tag: 'document_version' });
+        })
+      }
+      onAddVersionPhoto={() =>
+        selectedDocument &&
+        void withDetailBusy(async () => {
+          await documents.addVersion(selectedDocument.id, { source: 'capture', tag: 'document_version' });
+        })
+      }
+      onActivateVersion={(versionId) =>
+        selectedDocument &&
+        void withDetailBusy(async () => {
+          await documents.setActiveVersion(selectedDocument.id, versionId);
+        })
+      }
+      onSetStatus={(status) =>
+        selectedDocument &&
+        void withDetailBusy(async () => {
+          await documents.update(selectedDocument.id, { status });
+        })
+      }
+      onSoftDelete={() =>
+        selectedDocument &&
+        void withDetailBusy(async () => {
+          await documents.softDelete(selectedDocument.id);
+          setSelectedDocument(null);
+          setSelectedVersions([]);
+          setSelectedLinks([]);
+          setSelectedShareLinks([]);
+          setSelectedSignatures([]);
+          setActiveAsset(null);
+        })
+      }
+      onOpenActiveFile={() => {
+        void (async () => {
+          try {
+            if (!activeAsset) {
+              throw new Error('Fichier local introuvable.');
+            }
+
+            const available = await Sharing.isAvailableAsync();
+            if (!available) {
+              throw new Error('Partage iOS indisponible sur cet appareil.');
+            }
+
+            await Sharing.shareAsync(activeAsset.local_path, { mimeType: activeAsset.mime });
+          } catch (e) {
+            setError(e instanceof Error ? e.message : 'Ouverture fichier impossible.');
+          }
+        })();
+      }}
+      onOpenTaskPicker={() => setTaskPickerOpen(true)}
+      onOpenPinPicker={() => setPinPickerOpen(true)}
+      onOpenExportPicker={() => setExportPickerOpen(true)}
+      onUnlink={(link) =>
+        selectedDocument &&
+        void withDetailBusy(async () => {
+          await documents.unlink(selectedDocument.id, link.linked_entity, link.linked_id);
+        })
+      }
+      onCreateShareLink={() =>
+        selectedDocument &&
+        void withDetailBusy(async () => {
+          const created = await share.create('DOCUMENT', selectedDocument.id, { expiresInHours: 72 });
+          await share.list('DOCUMENT', selectedDocument.id).then(setSelectedShareLinks);
+          void Share.share({ message: created.url });
+        })
+      }
+      onRevokeShareLink={(linkId) =>
+        selectedDocument &&
+        void withDetailBusy(async () => {
+          await share.revoke(linkId);
+          const rows = await share.list('DOCUMENT', selectedDocument.id);
+          setSelectedShareLinks(rows);
+        })
+      }
+      onStartSignature={(versionId) => {
+        setSignatureTargetVersionId(versionId);
+        setSignatureModalOpen(true);
+      }}
+    />
+  );
+
+  const actor = useMemo<SignatureActor | null>(() => {
+    if (!user?.id) return null;
+    return {
+      user_id: user.id,
+      role: undefined,
+      display_name: user.email ?? undefined
+    };
+  }, [user?.email, user?.id]);
+
+  const signatureVersion =
+    signatureTargetVersionId && selectedVersions.length > 0
+      ? selectedVersions.find((v) => v.id === signatureTargetVersionId) ?? null
+      : null;
+
+  const onPickTask = useCallback(
+    (task: Task) => {
+      setTaskPickerOpen(false);
+      if (!selectedDocument) return;
+      void withDetailBusy(async () => {
+        await documents.link(selectedDocument.id, 'TASK', task.id);
+      });
+    },
+    [selectedDocument, withDetailBusy]
+  );
+
+  const onPickPin = useCallback(
+    (pin: PlanPin) => {
+      setPinPickerOpen(false);
+      if (!selectedDocument) return;
+      void withDetailBusy(async () => {
+        await documents.link(selectedDocument.id, 'PLAN_PIN', pin.id);
+      });
+    },
+    [selectedDocument, withDetailBusy]
+  );
+
+  const onPickExport = useCallback(
+    (job: ExportJob) => {
+      setExportPickerOpen(false);
+      if (!selectedDocument) return;
+      void withDetailBusy(async () => {
+        await documents.link(selectedDocument.id, 'EXPORT', job.id);
+      });
+    },
+    [selectedDocument, withDetailBusy]
+  );
+
+  if (!split) {
+    return (
+      <Screen>
+        {list}
+
+        <Modal visible={detail.open} animationType="slide" onRequestClose={closeDetail}>
+          <Screen>{detailPanel}</Screen>
+        </Modal>
+
+        {activeOrgId && user?.id ? (
+          <NewDocumentModal
+            visible={createOpen}
+            orgId={activeOrgId}
+            projectId={effectiveProjectId}
+            createdBy={user.id}
+            onClose={() => setCreateOpen(false)}
+            onCreated={(id) => {
+              setCreateOpen(false);
+              openDetail(id);
+              void loadPage('reset');
+            }}
+          />
+        ) : null}
+
+        {activeOrgId ? (
+          <TaskPickerModal visible={taskPickerOpen} projectId={effectiveProjectId} orgId={activeOrgId} onClose={() => setTaskPickerOpen(false)} onPick={onPickTask} />
+        ) : null}
+        <PinPickerModal visible={pinPickerOpen} projectId={effectiveProjectId} onClose={() => setPinPickerOpen(false)} onPick={onPickPin} />
+        <ExportPickerModal visible={exportPickerOpen} projectId={effectiveProjectId} onClose={() => setExportPickerOpen(false)} onPick={onPickExport} />
+
+        <SignatureModal
+          visible={signatureModalOpen}
+          document={selectedDocument}
+          version={signatureVersion}
+          actor={actor}
+          onClose={() => {
+            setSignatureModalOpen(false);
+            setSignatureTargetVersionId(null);
+          }}
+          onCompleted={async () => {
+            if (selectedDocument) {
+              await refreshDetail(selectedDocument.id);
+              await loadPage('reset');
+            }
+          }}
+        />
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen>
+      <View style={{ flex: 1, minHeight: 0, flexDirection: 'row', gap: spacing.md }}>
+        <View style={{ width: 380, minHeight: 0 }}>{list}</View>
+        <View style={{ flex: 1, minHeight: 0 }}>{detailPanel}</View>
       </View>
-      </ScrollView>
+
+      {activeOrgId && user?.id ? (
+        <NewDocumentModal
+          visible={createOpen}
+          orgId={activeOrgId}
+          projectId={effectiveProjectId}
+          createdBy={user.id}
+          onClose={() => setCreateOpen(false)}
+          onCreated={(id) => {
+            setCreateOpen(false);
+            openDetail(id);
+            void loadPage('reset');
+          }}
+        />
+      ) : null}
+
+      {activeOrgId ? (
+        <TaskPickerModal visible={taskPickerOpen} projectId={effectiveProjectId} orgId={activeOrgId} onClose={() => setTaskPickerOpen(false)} onPick={onPickTask} />
+      ) : null}
+      <PinPickerModal visible={pinPickerOpen} projectId={effectiveProjectId} onClose={() => setPinPickerOpen(false)} onPick={onPickPin} />
+      <ExportPickerModal visible={exportPickerOpen} projectId={effectiveProjectId} onClose={() => setExportPickerOpen(false)} onPick={onPickExport} />
+
+      <SignatureModal
+        visible={signatureModalOpen}
+        document={selectedDocument}
+        version={signatureVersion}
+        actor={actor}
+        onClose={() => {
+          setSignatureModalOpen(false);
+          setSignatureTargetVersionId(null);
+        }}
+        onCompleted={async () => {
+          if (selectedDocument) {
+            await refreshDetail(selectedDocument.id);
+            await loadPage('reset');
+          }
+        }}
+      />
     </Screen>
   );
 }

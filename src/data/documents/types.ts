@@ -47,7 +47,9 @@ export type DocumentsListFilters = {
   org_id?: string;
   status?: DocumentStatus | 'ALL';
   doc_type?: DocumentType | 'ALL';
+  doc_types?: DocumentType[];
   tags?: string[];
+  linked_entity?: LinkedEntity;
   include_deleted?: boolean;
   limit?: number;
   offset?: number;

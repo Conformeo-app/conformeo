@@ -1,5 +1,6 @@
 import keywordRulesConfig from './keywordRules.json';
-import { KeywordRule, KeywordRulesConfig, Task, TaskSuggestion } from './types';
+import { KeywordRulesConfig, Task, TaskSuggestion } from './types';
+import { rules as rulesEngine } from '../rules-engine';
 
 const RULES_CONFIG = keywordRulesConfig as KeywordRulesConfig;
 
@@ -9,17 +10,6 @@ function nowIso() {
 
 function normalize(value: string) {
   return value.trim().toLowerCase();
-}
-
-function hasKeyword(haystack: string, keywords: string[]) {
-  for (const keyword of keywords) {
-    const normalized = normalize(keyword);
-    if (normalized.length > 0 && haystack.includes(normalized)) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 function createSuggestion(ruleName: string, type: TaskSuggestion['type'], value: string): TaskSuggestion {
@@ -65,31 +55,32 @@ function mergeSuggestions(existing: TaskSuggestion[], next: TaskSuggestion[]) {
   return [...byId.values()];
 }
 
-export function evaluateKeywordRules(task: Task, rules: KeywordRule[] = RULES_CONFIG.rules) {
+export async function evaluateKeywordRules(task: Task) {
   const start = Date.now();
-  const content = [task.title, task.description ?? '', ...(task.tags ?? [])]
-    .join(' ')
-    .toLowerCase();
+
+  const evaluation = await rulesEngine.evaluate('TASK', {
+    org_id: task.org_id,
+    entity_id: task.id,
+    title: task.title,
+    description: task.description ?? '',
+    tags: task.tags ?? []
+  });
 
   const nextTags = new Set<string>();
   const nextSuggestions: TaskSuggestion[] = [];
 
-  for (const rule of rules) {
-    if (!hasKeyword(content, rule.keywords)) {
-      continue;
-    }
-
-    for (const action of rule.actions) {
-      if (action.type === 'ADD_TAG') {
+  for (const match of evaluation.matched) {
+    for (const action of match.actions) {
+      if (action.kind === 'ADD_TAG') {
         nextTags.add(normalize(action.value));
       }
 
-      if (action.type === 'SUGGEST') {
-        nextSuggestions.push(createSuggestion(rule.name, 'SUGGESTION', action.value));
+      if (action.kind === 'SUGGEST') {
+        nextSuggestions.push(createSuggestion(match.rule_id, 'SUGGESTION', action.value));
       }
 
-      if (action.type === 'ADD_REMINDER') {
-        nextSuggestions.push(createSuggestion(rule.name, 'REMINDER', action.value));
+      if (action.kind === 'ADD_REMINDER') {
+        nextSuggestions.push(createSuggestion(match.rule_id, 'REMINDER', action.value));
       }
     }
   }

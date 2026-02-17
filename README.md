@@ -34,6 +34,15 @@ Sans variables Supabase, l app demarre en mode local et signale l absence de bac
 - Migrations: `supabase/migrations/`
 - Guide: `supabase/README.md`
 
+## Security hardening
+- Scan local: `npm run security:scan`
+- Check release: `npm run security:release-check`
+- Guide complet: `docs/SECURITY_HARDENING.md`
+
+## Audit compliance
+- Guide module: `docs/AUDIT_COMPLIANCE.md`
+- Ecran app: module `Audit` (filtres + export JSON)
+
 ## Chiffrement local recommande
 Strategie conseillee:
 1. Maintenant: donnees sensibles en `expo-secure-store`, session non persistante.

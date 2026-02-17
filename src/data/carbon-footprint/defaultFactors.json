@@ -1,0 +1,28 @@
+{
+  "waste_kgco2e_per_m3": {
+    "GRAVATS": 8,
+    "BOIS": 12,
+    "METAUX": 18,
+    "PLASTIQUES": 30,
+    "PLATRE": 22,
+    "DIB": 35,
+    "DEEE": 25,
+    "AUTRE": 20
+  },
+  "travel_kgco2e_per_km": {
+    "CAR": 0.18,
+    "VAN": 0.25,
+    "TRUCK": 0.6,
+    "PUBLIC": 0.06,
+    "BIKE": 0,
+    "WALK": 0,
+    "OTHER": 0.2
+  },
+  "energy_kgco2e_per_unit": {
+    "ELECTRICITY_KWH": 0.08,
+    "DIESEL_L": 2.68,
+    "GAS_KWH": 0.2,
+    "OTHER": 0.1
+  }
+}
+

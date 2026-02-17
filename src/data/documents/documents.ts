@@ -1,6 +1,8 @@
 import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as SQLite from 'expo-sqlite';
+import { audit } from '../audit-compliance';
+import { assertProjectWritable } from '../control-mode/readOnly';
 import { media } from '../media';
 import { offlineDB } from '../offline/outbox';
 import {
@@ -143,6 +145,11 @@ function isValidStatus(status: string): status is DocumentStatus {
 
 function isValidLinkedEntity(entity: string): entity is LinkedEntity {
   return entity === 'TASK' || entity === 'PLAN_PIN' || entity === 'PROJECT' || entity === 'EXPORT';
+}
+
+function escapeLike(input: string) {
+  // Escape SQLite LIKE wildcards.
+  return input.replace(/[%_]/g, (value) => `\\${value}`);
 }
 
 function mapDocumentRow(row: DocumentRow): Document {
@@ -570,10 +577,23 @@ function mergeDocumentPatch(document: Document, patch: DocumentUpdatePatch): Doc
 export const documents = {
   async create(meta: DocumentCreateInput): Promise<Document> {
     const document = normalizeCreateInput(meta);
+
+    if (document.scope === 'PROJECT' && document.project_id) {
+      await assertProjectWritable(document.org_id, document.project_id);
+    }
+
     await saveDocument(document);
 
     await enqueueDocumentOperation(document, 'CREATE', {
       data: document
+    });
+
+    await audit.log('document.create', 'DOCUMENT', document.id, {
+      scope: document.scope,
+      project_id: document.project_id ?? null,
+      doc_type: document.doc_type,
+      status: document.status,
+      title: document.title
     });
 
     return document;
@@ -581,6 +601,11 @@ export const documents = {
 
   async update(id: string, patch: DocumentUpdatePatch): Promise<Document> {
     const current = await ensureDocumentExists(id);
+
+    if (current.scope === 'PROJECT' && current.project_id) {
+      await assertProjectWritable(current.org_id, current.project_id);
+    }
+
     const updated = mergeDocumentPatch(current, patch);
 
     if (updated.title.length < 2) {
@@ -594,11 +619,22 @@ export const documents = {
       data: updated
     });
 
+    await audit.log('document.update', 'DOCUMENT', updated.id, {
+      patch,
+      status: updated.status,
+      doc_type: updated.doc_type,
+      deleted_at: updated.deleted_at ?? null
+    });
+
     return updated;
   },
 
   async softDelete(id: string): Promise<void> {
     const current = await ensureDocumentExists(id);
+
+    if (current.scope === 'PROJECT' && current.project_id) {
+      await assertProjectWritable(current.org_id, current.project_id);
+    }
 
     if (current.deleted_at) {
       return;
@@ -616,6 +652,13 @@ export const documents = {
     await enqueueDocumentOperation(next, 'UPDATE', {
       patch: { deleted_at: next.deleted_at },
       data: next
+    });
+
+    await audit.log('document.soft_delete', 'DOCUMENT', next.id, {
+      deleted_at: next.deleted_at,
+      doc_type: next.doc_type,
+      status: next.status,
+      title: next.title
     });
   },
 
@@ -662,9 +705,32 @@ export const documents = {
       params.push(filters.doc_type);
     }
 
+    if (filters.doc_types && filters.doc_types.length > 0) {
+      const unique = Array.from(new Set(filters.doc_types.filter((item) => isValidType(item))));
+      if (unique.length > 0) {
+        where.push(`doc_type IN (${unique.map(() => '?').join(', ')})`);
+        params.push(...unique);
+      }
+    }
+
     if (filters.status && filters.status !== 'ALL') {
       where.push('status = ?');
       params.push(filters.status);
+    }
+
+    if (filters.linked_entity && isValidLinkedEntity(filters.linked_entity)) {
+      where.push(
+        `EXISTS (SELECT 1 FROM ${LINKS_TABLE} l WHERE l.document_id = ${DOCUMENTS_TABLE}.id AND l.linked_entity = ?)`
+      );
+      params.push(filters.linked_entity);
+    }
+
+    if (filters.tags && filters.tags.length > 0) {
+      const expected = normalizeTags(filters.tags);
+      for (const tag of expected) {
+        where.push(`tags_json LIKE ? ESCAPE '\\'`);
+        params.push(`%\"${escapeLike(tag)}\"%`);
+      }
     }
 
     const rows = await db.getAllAsync<DocumentRow>(
@@ -673,22 +739,114 @@ export const documents = {
         FROM ${DOCUMENTS_TABLE}
         WHERE ${where.join(' AND ')}
         ORDER BY updated_at DESC
+        LIMIT ?
+        OFFSET ?
       `,
-      ...params
+      ...params,
+      limit,
+      offset
     );
 
-    let mapped = rows.map(mapDocumentRow);
+    return rows.map(mapDocumentRow);
+  },
+
+  async listByProject(projectId: string, filters: DocumentsListFilters = {}) {
+    return this.list('PROJECT', projectId, filters);
+  },
+
+  async searchByProject(projectId: string, q: string, filters: DocumentsListFilters = {}) {
+    const cleanedProjectId = normalizeText(projectId);
+    if (!cleanedProjectId) {
+      return [] as Document[];
+    }
+
+    const query = normalizeText(q);
+    if (query.length === 0) {
+      return this.list('PROJECT', cleanedProjectId, filters);
+    }
+
+    await ensureSetup();
+    const db = await getDb();
+
+    const limit = Math.max(1, Math.min(filters.limit ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
+    const offset = Math.max(0, filters.offset ?? 0);
+
+    const where: string[] = ['scope = ?', 'project_id = ?'];
+    const params: Array<string | number> = ['PROJECT', cleanedProjectId];
+
+    if (filters.org_id) {
+      where.push('org_id = ?');
+      params.push(filters.org_id);
+    }
+
+    if (!filters.include_deleted) {
+      where.push('deleted_at IS NULL');
+    }
+
+    if (filters.doc_type && filters.doc_type !== 'ALL') {
+      where.push('doc_type = ?');
+      params.push(filters.doc_type);
+    }
+
+    if (filters.doc_types && filters.doc_types.length > 0) {
+      const unique = Array.from(new Set(filters.doc_types.filter((item) => isValidType(item))));
+      if (unique.length > 0) {
+        where.push(`doc_type IN (${unique.map(() => '?').join(', ')})`);
+        params.push(...unique);
+      }
+    }
+
+    if (filters.status && filters.status !== 'ALL') {
+      where.push('status = ?');
+      params.push(filters.status);
+    }
+
+    if (filters.linked_entity && isValidLinkedEntity(filters.linked_entity)) {
+      where.push(
+        `EXISTS (SELECT 1 FROM ${LINKS_TABLE} l WHERE l.document_id = ${DOCUMENTS_TABLE}.id AND l.linked_entity = ?)`
+      );
+      params.push(filters.linked_entity);
+    }
 
     if (filters.tags && filters.tags.length > 0) {
       const expected = normalizeTags(filters.tags);
-      mapped = mapped.filter((document) => expected.every((tag) => document.tags.includes(tag)));
+      for (const tag of expected) {
+        where.push(`tags_json LIKE ? ESCAPE '\\'`);
+        params.push(`%\"${escapeLike(tag)}\"%`);
+      }
     }
 
-    return mapped.slice(offset, offset + limit);
+    const safeQuery = escapeLike(query.toLowerCase());
+    const like = `%${safeQuery}%`;
+
+    where.push(
+      `(lower(title) LIKE ? ESCAPE '\\' OR lower(COALESCE(description, '')) LIKE ? ESCAPE '\\' OR lower(tags_json) LIKE ? ESCAPE '\\')`
+    );
+    params.push(like, like, like);
+
+    const rows = await db.getAllAsync<DocumentRow>(
+      `
+        SELECT *
+        FROM ${DOCUMENTS_TABLE}
+        WHERE ${where.join(' AND ')}
+        ORDER BY updated_at DESC
+        LIMIT ?
+        OFFSET ?
+      `,
+      ...params,
+      limit,
+      offset
+    );
+
+    return rows.map(mapDocumentRow);
   },
 
   async addVersion(documentId: string, fileContext: AddVersionContext = {}): Promise<DocumentVersion> {
     const document = await ensureDocumentExists(documentId);
+
+    if (document.scope === 'PROJECT' && document.project_id) {
+      await assertProjectWritable(document.org_id, document.project_id);
+    }
 
     const existingCount = await getDocumentVersionCount(documentId);
     if (existingCount >= MAX_VERSIONS_PER_DOCUMENT) {
@@ -778,6 +936,11 @@ export const documents = {
 
   async setActiveVersion(documentId: string, versionId: string): Promise<void> {
     const document = await ensureDocumentExists(documentId);
+
+    if (document.scope === 'PROJECT' && document.project_id) {
+      await assertProjectWritable(document.org_id, document.project_id);
+    }
+
     const version = await getVersionById(versionId);
 
     if (!version || version.document_id !== document.id) {
@@ -801,6 +964,10 @@ export const documents = {
   async link(documentId: string, entity: LinkedEntity, entityId: string): Promise<void> {
     const document = await ensureDocumentExists(documentId);
 
+    if (document.scope === 'PROJECT' && document.project_id) {
+      await assertProjectWritable(document.org_id, document.project_id);
+    }
+
     if (!isValidLinkedEntity(entity)) {
       throw new Error(`Entité liée invalide: ${entity}`);
     }
@@ -821,7 +988,7 @@ export const documents = {
       created_at: nowIso()
     };
 
-    await db.runAsync(
+    const result = await db.runAsync(
       `
         INSERT OR IGNORE INTO ${LINKS_TABLE}
         (id, document_id, linked_entity, linked_id, created_at)
@@ -834,10 +1001,72 @@ export const documents = {
       link.created_at
     );
 
+    if ((result.changes ?? 0) > 0) {
+      await offlineDB.enqueueOperation({
+        entity: 'document_links',
+        entity_id: link.id,
+        type: 'CREATE',
+        payload: {
+          ...link,
+          org_id: document.org_id,
+          orgId: document.org_id,
+          project_id: document.project_id
+        }
+      });
+    }
+  },
+
+  async unlink(documentId: string, entity: LinkedEntity, entityId: string): Promise<void> {
+    const document = await ensureDocumentExists(documentId, true);
+
+    if (document.scope === 'PROJECT' && document.project_id) {
+      await assertProjectWritable(document.org_id, document.project_id);
+    }
+
+    if (!isValidLinkedEntity(entity)) {
+      throw new Error(`Entité liée invalide: ${entity}`);
+    }
+
+    const linkedId = normalizeText(entityId);
+    if (!linkedId) {
+      throw new Error('linked_id est requis.');
+    }
+
+    await ensureSetup();
+    const db = await getDb();
+
+    const row = await db.getFirstAsync<LinkRow>(
+      `
+        SELECT *
+        FROM ${LINKS_TABLE}
+        WHERE document_id = ?
+          AND linked_entity = ?
+          AND linked_id = ?
+        LIMIT 1
+      `,
+      document.id,
+      entity,
+      linkedId
+    );
+
+    if (!row) {
+      return;
+    }
+
+    await db.runAsync(
+      `
+        DELETE FROM ${LINKS_TABLE}
+        WHERE id = ?
+      `,
+      row.id
+    );
+
+    const link = mapLinkRow(row);
+
     await offlineDB.enqueueOperation({
       entity: 'document_links',
       entity_id: link.id,
-      type: 'CREATE',
+      type: 'DELETE',
       payload: {
         ...link,
         org_id: document.org_id,
@@ -845,6 +1074,75 @@ export const documents = {
         project_id: document.project_id
       }
     });
+
+    await audit.log('document.unlink', 'DOCUMENT', document.id, {
+      linked_entity: entity,
+      linked_id: linkedId
+    });
+  },
+
+  async getActiveVersionNumbers(documentIds: string[]) {
+    await ensureSetup();
+
+    const ids = documentIds.map((id) => normalizeText(id)).filter(Boolean);
+    if (ids.length === 0) {
+      return {} as Record<string, number | null>;
+    }
+
+    const db = await getDb();
+    const placeholders = ids.map(() => '?').join(', ');
+
+    const rows = await db.getAllAsync<{ document_id: string; version_number: number | null }>(
+      `
+        SELECT d.id AS document_id,
+               v.version_number AS version_number
+        FROM ${DOCUMENTS_TABLE} d
+        LEFT JOIN ${VERSIONS_TABLE} v ON v.id = d.active_version_id
+        WHERE d.id IN (${placeholders})
+      `,
+      ...ids
+    );
+
+    const result: Record<string, number | null> = {};
+    for (const id of ids) {
+      result[id] = null;
+    }
+    for (const row of rows) {
+      result[row.document_id] = typeof row.version_number === 'number' ? row.version_number : null;
+    }
+    return result;
+  },
+
+  async getLinkCounts(documentIds: string[]) {
+    await ensureSetup();
+
+    const ids = documentIds.map((id) => normalizeText(id)).filter(Boolean);
+    if (ids.length === 0) {
+      return {} as Record<string, number>;
+    }
+
+    const db = await getDb();
+    const placeholders = ids.map(() => '?').join(', ');
+
+    const rows = await db.getAllAsync<{ document_id: string; count: number }>(
+      `
+        SELECT document_id AS document_id,
+               COUNT(*) AS count
+        FROM ${LINKS_TABLE}
+        WHERE document_id IN (${placeholders})
+        GROUP BY document_id
+      `,
+      ...ids
+    );
+
+    const result: Record<string, number> = {};
+    for (const id of ids) {
+      result[id] = 0;
+    }
+    for (const row of rows) {
+      result[row.document_id] = row.count ?? 0;
+    }
+    return result;
   },
 
   async listLinks(documentId: string): Promise<DocumentLink[]> {

@@ -1,0 +1,72 @@
+export type ProjectTabKey = 'Overview' | 'Tasks' | 'Plans' | 'Media' | 'Documents' | 'Control';
+
+export type RootDrawerParamList = {
+  Dashboard: undefined;
+  Projects: undefined;
+  Equipment: undefined;
+  Planning: undefined;
+  Team: undefined;
+  Security: undefined;
+  Enterprise: undefined;
+  Account: undefined;
+};
+
+export type ProjectsStackParamList = {
+  ProjectsList: undefined;
+  ProjectCreate: undefined;
+  ProjectEdit: { projectId: string };
+  ProjectDetail: { projectId: string; tab?: ProjectTabKey };
+  WasteVolume: { projectId: string };
+  Carbon: { projectId: string };
+  Exports: { projectId: string };
+};
+
+export type ProjectTabsParamList = {
+  OverviewTab: { projectId: string };
+  TasksTab: { projectId: string };
+  PlansTab: { projectId: string };
+  MediaTab: { projectId: string; uploadStatus?: 'ALL' | 'PENDING' | 'FAILED' };
+  DocumentsTab: { projectId: string };
+  ControlTab: { projectId: string };
+};
+
+export type EquipmentStackParamList = {
+  EquipmentHome: undefined;
+};
+
+export type PlanningStackParamList = {
+  PlanningHome: undefined;
+};
+
+export type TeamStackParamList = {
+  TeamHome: undefined;
+};
+
+export type SecurityStackParamList = {
+  SecurityHub: undefined;
+  UIGallery: undefined;
+  UIGalleryAtoms: undefined;
+  UIGalleryInputs: undefined;
+  UIGallerySurfaces: undefined;
+  UIGalleryPatterns: undefined;
+  UIGalleryStates: undefined;
+  SecuritySettings: undefined;
+  Search: undefined;
+  Offline: undefined;
+  Conflicts: undefined;
+  Audit: undefined;
+  SuperAdmin: undefined;
+};
+
+export type EnterpriseStackParamList = {
+  EnterpriseHub: undefined;
+  OrgAdmin: undefined;
+  CompanyHub: undefined;
+  Offers: undefined;
+  Governance: undefined;
+  Backup: undefined;
+};
+
+export type AccountStackParamList = {
+  AccountHome: undefined;
+};

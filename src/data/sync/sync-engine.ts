@@ -2,6 +2,7 @@ import * as Network from 'expo-network';
 import { securityPolicies } from '../../core/security/policies';
 import { offlineDB, OfflineOperation } from '../offline/outbox';
 import { mediaUploadWorker } from '../media/uploadWorker';
+import { sign } from '../signature-probante';
 import { createSyncTransport } from './transport';
 import { ApplyOperationResponse, SyncRunResult, SyncTransport } from './types';
 import { conflicts } from './conflicts';
@@ -328,6 +329,9 @@ class SyncEngine {
       const response = await this.transport.pushOperation(operation);
 
       if (response.status === 'OK' || response.status === 'DUPLICATE') {
+        if (operation.entity === 'signatures') {
+          await sign.markFinal(operation.entity_id, response.server_updated_at);
+        }
         await this.markSynced(operation.id);
         this.consecutiveFailures = 0;
         return 'PUSHED';

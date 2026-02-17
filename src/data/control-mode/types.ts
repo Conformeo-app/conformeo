@@ -5,11 +5,11 @@ import { Task } from '../tasks';
 export type RiskLevel = 'OK' | 'WATCH' | 'RISK';
 
 export type ControlSummary = {
-  openTasks: number;
   blockedTasks: number;
-  mediaCount: number;
-  documentsCount: number;
-  lastActivityAt?: string;
+  openSafetyTasks: number;
+  failedUploads: number;
+  pendingUploads: number;
+  docsCount: number;
   riskLevel: RiskLevel;
 };
 
@@ -56,6 +56,13 @@ export type ChecklistWithItems = {
   items: InspectionItem[];
 };
 
+export type InspectionScore = {
+  score_checked: number;
+  score_total: number;
+};
+
+export type InspectionSummary = InspectionChecklist & InspectionScore;
+
 export type ControlModeState = {
   project_id: string;
   org_id: string;
@@ -100,9 +107,15 @@ export type ControlModeApi = {
 
   createChecklist: (projectId: string) => Promise<InspectionChecklist>;
   getLatestChecklist: (projectId: string) => Promise<ChecklistWithItems>;
+  listInspections: (projectId: string, options?: { limit?: number; offset?: number }) => Promise<InspectionSummary[]>;
+  computeScore: (checklistId: string) => Promise<InspectionScore>;
   toggleItem: (itemId: string, checked: boolean) => Promise<void>;
   setComment: (itemId: string, text: string) => Promise<void>;
   getChecklistTemplate: () => Promise<ChecklistTemplateConfig>;
 
   generateControlPack: (projectId: string) => Promise<ExportJob>;
+
+  // Alias UX (inspection = checklist)
+  createInspection: (projectId: string) => Promise<InspectionChecklist>;
+  getLatestInspection: (projectId: string) => Promise<ChecklistWithItems>;
 };

@@ -1,4 +1,5 @@
-import { isRunningInExpoGo, requireOptionalNativeModule } from 'expo';
+import { isRunningInExpoGo } from 'expo';
+import Constants from 'expo-constants';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type DictationField = 'title' | 'description' | 'comment';
@@ -36,20 +37,31 @@ function isSpeechModule(value: unknown): value is SpeechModule {
   );
 }
 
+function isInExpoGo() {
+  try {
+    if (typeof isRunningInExpoGo === "function") {
+      return isRunningInExpoGo();
+    }
+  } catch {}
+
+  return Constants.appOwnership === "expo";
+}
+
 async function loadSpeechModule() {
-  if (isRunningInExpoGo()) {
+  if (isInExpoGo()) {
     return null;
   }
 
-  const nativeModule =
-    requireOptionalNativeModule<SpeechModule>('ExpoSpeechRecognition') ??
-    requireOptionalNativeModule<SpeechModule>('ExpoSpeechRecognitionModule');
-
-  if (!isSpeechModule(nativeModule)) {
+  try {
+    const speech = await import('expo-speech-recognition');
+    const candidate = (speech as unknown as { ExpoSpeechRecognitionModule?: unknown }).ExpoSpeechRecognitionModule ?? null;
+    if (!isSpeechModule(candidate)) {
+      return null;
+    }
+    return candidate;
+  } catch {
     return null;
   }
-
-  return nativeModule;
 }
 
 function appendText(base: string, chunk: string) {
@@ -71,7 +83,7 @@ export function useTaskDictation() {
   const [isListening, setIsListening] = useState(false);
   const [activeField, setActiveField] = useState<DictationField | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isAvailable, setIsAvailable] = useState<boolean>(true);
+  const [isAvailable, setIsAvailable] = useState<boolean>(() => !isInExpoGo());
 
   const clearListeners = useCallback(() => {
     for (const listener of listenersRef.current) {

@@ -1,0 +1,2 @@
+# This function is public: it must be callable without Supabase Auth.
+verify_jwt = false

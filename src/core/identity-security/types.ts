@@ -38,3 +38,13 @@ export type SessionAuditEntry = {
   last_seen_at: string;
   revoked_at?: string | null;
 };
+
+export type DeviceEntry = {
+  device_id: string;
+  device_label: string | null;
+  session_count: number;
+  created_at: string;
+  last_seen_at: string;
+  revoked_at: string | null;
+  is_current: boolean;
+};

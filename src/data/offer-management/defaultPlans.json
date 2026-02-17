@@ -1,0 +1,83 @@
+{
+  "plans": [
+    {
+      "key": "STARTER",
+      "name": "Starter",
+      "base_price_eur_month": 49,
+      "included_active_projects": 1,
+      "extra_project_eur_month": 15,
+      "included_modules": [
+        "dashboard",
+        "tasks",
+        "media",
+        "documents",
+        "exports",
+        "waste",
+        "carbon",
+        "offline"
+      ]
+    },
+    {
+      "key": "PRO",
+      "name": "Pro",
+      "base_price_eur_month": 149,
+      "included_active_projects": 5,
+      "extra_project_eur_month": 10,
+      "included_modules": [
+        "dashboard",
+        "accelerators",
+        "orgs",
+        "company",
+        "tasks",
+        "equipment",
+        "planning",
+        "media",
+        "documents",
+        "exports",
+        "waste",
+        "carbon",
+        "search",
+        "offline",
+        "conflicts",
+        "control",
+        "plans",
+        "security",
+        "audit",
+        "backup",
+        "governance"
+      ]
+    },
+    {
+      "key": "ENTERPRISE",
+      "name": "Enterprise",
+      "base_price_eur_month": 399,
+      "included_active_projects": 999,
+      "extra_project_eur_month": 0,
+      "included_modules": [
+        "dashboard",
+        "accelerators",
+        "orgs",
+        "company",
+        "tasks",
+        "equipment",
+        "planning",
+        "media",
+        "documents",
+        "exports",
+        "waste",
+        "carbon",
+        "search",
+        "offline",
+        "conflicts",
+        "control",
+        "plans",
+        "security",
+        "audit",
+        "backup",
+        "governance",
+        "superadmin"
+      ]
+    }
+  ]
+}
+

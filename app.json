@@ -20,7 +20,8 @@
         "NSPhotoLibraryUsageDescription": "Conformeo a besoin d'acceder a la galerie pour importer des medias chantier.",
         "NSPhotoLibraryAddUsageDescription": "Conformeo peut enregistrer des exports media sur votre appareil.",
         "NSMicrophoneUsageDescription": "Conformeo utilise le micro pour la dictee de taches et commentaires.",
-        "NSSpeechRecognitionUsageDescription": "Conformeo transcrit votre voix localement pour accelerer la saisie terrain."
+        "NSSpeechRecognitionUsageDescription": "Conformeo transcrit votre voix localement pour accelerer la saisie terrain.",
+        "NSLocationWhenInUseUsageDescription": "Conformeo utilise votre position pour horodater preuves, taches et signatures sur chantier."
       }
     },
     "android": {
@@ -28,10 +29,12 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F6F2EA"
       },
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"],
       "package": "com.conformeo.app"
     },
     "plugins": [
       "expo-font",
+      "expo-location",
       [
         "expo-image-picker",
         {

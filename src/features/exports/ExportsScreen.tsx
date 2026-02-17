@@ -1,9 +1,11 @@
 import * as Sharing from 'expo-sharing';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Share, TextInput, View } from 'react-native';
 import { useAuth } from '../../core/auth';
 import { ExportJob, ExportType, exportsDoe } from '../../data/exports';
+import { share } from '../../data/external-sharing';
 import { useSyncStatus } from '../../data/sync/useSyncStatus';
+import { useAppNavigationContext } from '../../navigation/contextStore';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
 import { Text } from '../../ui/components/Text';
@@ -50,10 +52,13 @@ function formatDate(iso?: string) {
   return new Date(iso).toLocaleString('fr-FR');
 }
 
-export function ExportsScreen() {
+export function ExportsScreen({ projectId }: { projectId?: string } = {}) {
   const { colors, spacing, radii } = useTheme();
   const { activeOrgId, user } = useAuth();
   const { status: syncStatus } = useSyncStatus();
+  const navCtx = useAppNavigationContext();
+
+  const effectiveProjectId = projectId ?? navCtx.projectId ?? DEMO_PROJECT_ID;
 
   const [selectedType, setSelectedType] = useState<ExportType>('REPORT_PDF');
   const [jobs, setJobs] = useState<ExportJob[]>([]);
@@ -81,7 +86,7 @@ export function ExportsScreen() {
     setRefreshing(true);
 
     try {
-      const next = await exportsDoe.listByProject(DEMO_PROJECT_ID);
+      const next = await exportsDoe.listByProject(effectiveProjectId);
       setJobs(next);
     } catch (listError) {
       const message = listError instanceof Error ? listError.message : 'Chargement exports impossible.';
@@ -89,7 +94,7 @@ export function ExportsScreen() {
     } finally {
       setRefreshing(false);
     }
-  }, [activeOrgId]);
+  }, [activeOrgId, effectiveProjectId]);
 
   const recomputeEstimate = useCallback(async () => {
     if (!activeOrgId) {
@@ -98,12 +103,12 @@ export function ExportsScreen() {
     }
 
     try {
-      const size = await exportsDoe.computeEstimatedSize(DEMO_PROJECT_ID, selectedType);
+      const size = await exportsDoe.computeEstimatedSize(effectiveProjectId, selectedType);
       setEstimatedSize(size);
     } catch {
       setEstimatedSize(null);
     }
-  }, [activeOrgId, selectedType]);
+  }, [activeOrgId, effectiveProjectId, selectedType]);
 
   useEffect(() => {
     void refresh();
@@ -151,12 +156,12 @@ export function ExportsScreen() {
     }
 
     void withBusy(async () => {
-      const estimated = await exportsDoe.computeEstimatedSize(DEMO_PROJECT_ID, selectedType);
+      const estimated = await exportsDoe.computeEstimatedSize(effectiveProjectId, selectedType);
       if (estimated > exportsDoe.config.maxLocalExportSizeBytes) {
         throw new Error('Export trop lourd: utiliser export serveur (v1).');
       }
 
-      const created = await exportsDoe.createJob(DEMO_PROJECT_ID, selectedType);
+      const created = await exportsDoe.createJob(effectiveProjectId, selectedType);
       setJobs((current) => [created, ...current]);
 
       void exportsDoe.run(created.id).then(() => {
@@ -164,7 +169,7 @@ export function ExportsScreen() {
         void recomputeEstimate();
       });
     });
-  }, [activeOrgId, recomputeEstimate, refresh, selectedType, user?.id, withBusy]);
+  }, [activeOrgId, effectiveProjectId, recomputeEstimate, refresh, selectedType, user?.id, withBusy]);
 
   const rerunJob = useCallback(
     (job: ExportJob) => {
@@ -222,6 +227,16 @@ export function ExportsScreen() {
       setError(message);
     }
   }, []);
+
+  const shareExternalLink = useCallback(
+    (job: ExportJob) => {
+      void withBusy(async () => {
+        const created = await share.create('EXPORT', job.id, { expiresInHours: 72 });
+        await Share.share({ message: created.url });
+      });
+    },
+    [withBusy]
+  );
 
   return (
     <View style={{ flex: 1 }}>
@@ -382,6 +397,7 @@ export function ExportsScreen() {
                   <>
                     <Button label="Ouvrir" kind="ghost" onPress={() => void shareJob(item, 'open')} disabled={busy} />
                     <Button label="Partager" onPress={() => void shareJob(item, 'share')} disabled={busy} />
+                    <Button label="Lien externe" kind="ghost" onPress={() => shareExternalLink(item)} disabled={busy} />
                   </>
                 ) : null}
 

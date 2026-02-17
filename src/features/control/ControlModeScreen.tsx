@@ -14,15 +14,15 @@ import {
 import { useAuth } from '../../core/auth';
 import {
   ChecklistWithItems,
-  ControlActivity,
   ControlSummary,
   InspectionItem,
+  InspectionSummary,
   controlMode
 } from '../../data/control-mode';
 import { ExportJob, exportsDoe } from '../../data/exports';
 import { media, MediaAsset } from '../../data/media';
-import { Task } from '../../data/tasks';
 import { useSyncStatus } from '../../data/sync/useSyncStatus';
+import { useAppNavigationContext } from '../../navigation/contextStore';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
 import { Text } from '../../ui/components/Text';
@@ -56,16 +56,6 @@ function riskColor(
   return palette.rose;
 }
 
-function taskStatusColor(
-  status: Task['status'],
-  palette: { mint: string; amber: string; teal: string; rose: string }
-) {
-  if (status === 'DONE') return palette.mint;
-  if (status === 'TODO') return palette.amber;
-  if (status === 'DOING') return palette.teal;
-  return palette.rose;
-}
-
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -90,11 +80,25 @@ function fromDateForWindow(window: ProofWindow) {
   return last7Days.toISOString();
 }
 
-export function ControlModeScreen() {
+export function ControlModeScreen(
+  {
+    projectId: projectIdProp,
+    controlEnabled: controlEnabledProp,
+    onControlModeChanged
+  }: {
+    projectId?: string;
+    controlEnabled?: boolean;
+    onControlModeChanged?: (enabled: boolean) => void;
+  } = {}
+) {
   const { colors, spacing, radii } = useTheme();
   const { width } = useWindowDimensions();
   const { activeOrgId, user } = useAuth();
   const { status: syncStatus } = useSyncStatus();
+  const navCtx = useAppNavigationContext();
+
+  const fixedProjectId = projectIdProp ?? navCtx.projectId ?? null;
+  const hasFixedProject = Boolean(fixedProjectId);
 
   const [tab, setTab] = useState<TabKey>('SUMMARY');
   const [projectOptions, setProjectOptions] = useState<string[]>([]);
@@ -102,8 +106,8 @@ export function ControlModeScreen() {
 
   const [modeEnabled, setModeEnabled] = useState(false);
   const [summary, setSummary] = useState<ControlSummary | null>(null);
-  const [openIssues, setOpenIssues] = useState<Task[]>([]);
-  const [activity, setActivity] = useState<ControlActivity[]>([]);
+  const [criticalPreview, setCriticalPreview] = useState<MediaAsset[]>([]);
+  const [inspections, setInspections] = useState<InspectionSummary[]>([]);
 
   const [checklist, setChecklist] = useState<ChecklistWithItems | null>(null);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
@@ -139,6 +143,12 @@ export function ControlModeScreen() {
   }, []);
 
   const refreshProjectOptions = useCallback(async () => {
+    if (fixedProjectId) {
+      setProjectOptions([fixedProjectId]);
+      setProjectId(fixedProjectId);
+      return;
+    }
+
     if (!activeOrgId) {
       setProjectOptions([]);
       setProjectId(FALLBACK_PROJECT_ID);
@@ -155,14 +165,14 @@ export function ControlModeScreen() {
       setProjectOptions([FALLBACK_PROJECT_ID]);
       setProjectId(FALLBACK_PROJECT_ID);
     }
-  }, [activeOrgId]);
+  }, [activeOrgId, fixedProjectId]);
 
   const refreshSummary = useCallback(async () => {
     if (!activeOrgId || !projectId) {
       setSummary(null);
-      setOpenIssues([]);
-      setActivity([]);
       setChecklist(null);
+      setInspections([]);
+      setCriticalPreview([]);
       setModeEnabled(false);
       return;
     }
@@ -170,20 +180,20 @@ export function ControlModeScreen() {
     setLoadingSummary(true);
 
     try {
-      const [enabled, summaryValue, issues, timeline, latestChecklist, currentExportJobs] = await Promise.all([
+      const [enabled, summaryValue, latestChecklist, inspectionHistory, previewProofs, currentExportJobs] = await Promise.all([
         controlMode.isEnabled(projectId),
         controlMode.getSummary(projectId),
-        controlMode.listOpenIssues(projectId),
-        controlMode.getRecentActivity(projectId, 10),
         controlMode.getLatestChecklist(projectId),
+        controlMode.listInspections(projectId, { limit: 12, offset: 0 }),
+        controlMode.listCriticalProofs(projectId, { critical_only: true, limit: 9, offset: 0 }),
         exportsDoe.listByProject(projectId)
       ]);
 
       setModeEnabled(enabled);
       setSummary(summaryValue);
-      setOpenIssues(issues);
-      setActivity(timeline);
       setChecklist(latestChecklist);
+      setInspections(inspectionHistory);
+      setCriticalPreview(previewProofs);
 
       setCommentDrafts(
         Object.fromEntries(
@@ -246,8 +256,24 @@ export function ControlModeScreen() {
   }, [refreshProjectOptions]);
 
   useEffect(() => {
+    if (fixedProjectId && projectId !== fixedProjectId) {
+      setProjectId(fixedProjectId);
+      setProjectOptions([fixedProjectId]);
+    }
+  }, [fixedProjectId, projectId]);
+
+  useEffect(() => {
     void refreshSummary();
   }, [refreshSummary]);
+
+  useEffect(() => {
+    if (typeof controlEnabledProp !== 'boolean') {
+      return;
+    }
+
+    setModeEnabled(controlEnabledProp);
+    void refreshSummary();
+  }, [controlEnabledProp, refreshSummary]);
 
   useEffect(() => {
     if (tab !== 'PROOFS') {
@@ -293,9 +319,10 @@ export function ControlModeScreen() {
         }
 
         await refreshSummary();
+        onControlModeChanged?.(nextEnabled);
       });
     },
-    [projectId, refreshSummary, withBusy]
+    [onControlModeChanged, projectId, refreshSummary, withBusy]
   );
 
   const confirmModeToggle = useCallback(() => {
@@ -370,26 +397,16 @@ export function ControlModeScreen() {
 
   const toggleChecklistItem = useCallback(
     (item: InspectionItem) => {
-      if (modeEnabled) {
-        setError('Lecture seule active: checklist verrouillee.');
-        return;
-      }
-
       void withBusy(async () => {
         await controlMode.toggleItem(item.id, !item.checked);
         await refreshSummary();
       });
     },
-    [modeEnabled, refreshSummary, withBusy]
+    [refreshSummary, withBusy]
   );
 
   const saveChecklistComment = useCallback(
     (itemId: string) => {
-      if (modeEnabled) {
-        setError('Lecture seule active: checklist verrouillee.');
-        return;
-      }
-
       const value = (commentDrafts[itemId] ?? '').trim();
 
       void withBusy(async () => {
@@ -397,20 +414,15 @@ export function ControlModeScreen() {
         await refreshSummary();
       });
     },
-    [commentDrafts, modeEnabled, refreshSummary, withBusy]
+    [commentDrafts, refreshSummary, withBusy]
   );
 
   const createNewChecklist = useCallback(() => {
-    if (modeEnabled) {
-      setError('Lecture seule active: creation checklist bloquee.');
-      return;
-    }
-
     void withBusy(async () => {
       await controlMode.createChecklist(projectId);
       await refreshSummary();
     });
-  }, [modeEnabled, projectId, refreshSummary, withBusy]);
+  }, [projectId, refreshSummary, withBusy]);
 
   const openCriticalProofsTab = useCallback(() => {
     setCriticalOnly(true);
@@ -418,6 +430,12 @@ export function ControlModeScreen() {
   }, []);
 
   const riskPillColor = summary ? riskColor(summary.riskLevel, colors) : colors.fog;
+
+  const checklistScore = useMemo(() => {
+    const items = checklist?.items ?? [];
+    const checked = items.filter((item) => item.checked).length;
+    return { checked, total: items.length };
+  }, [checklist?.items]);
 
   const proofHeader = useMemo(
     () => (
@@ -536,34 +554,40 @@ export function ControlModeScreen() {
 
       <Card>
         <Text variant="h2">Chantier</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={{ marginTop: spacing.sm }}
-          contentContainerStyle={{ gap: spacing.sm }}
-        >
-          {projectOptions.map((option) => {
-            const active = option === projectId;
-            return (
-              <Pressable
-                key={option}
-                onPress={() => setProjectId(option)}
-                style={{
-                  borderRadius: radii.pill,
-                  borderWidth: 1,
-                  borderColor: active ? colors.teal : colors.fog,
-                  backgroundColor: active ? colors.mint : colors.white,
-                  paddingHorizontal: spacing.md,
-                  paddingVertical: spacing.xs
-                }}
-              >
-                <Text variant="caption" style={{ color: active ? colors.ink : colors.slate }}>
-                  {option}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+        {hasFixedProject ? (
+          <Text variant="body" style={{ color: colors.slate, marginTop: spacing.sm }}>
+            {projectId}
+          </Text>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ marginTop: spacing.sm }}
+            contentContainerStyle={{ gap: spacing.sm }}
+          >
+            {projectOptions.map((option) => {
+              const active = option === projectId;
+              return (
+                <Pressable
+                  key={option}
+                  onPress={() => setProjectId(option)}
+                  style={{
+                    borderRadius: radii.pill,
+                    borderWidth: 1,
+                    borderColor: active ? colors.teal : colors.fog,
+                    backgroundColor: active ? colors.mint : colors.white,
+                    paddingHorizontal: spacing.md,
+                    paddingVertical: spacing.xs
+                  }}
+                >
+                  <Text variant="caption" style={{ color: active ? colors.ink : colors.slate }}>
+                    {option}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        )}
 
         <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
           <Button
@@ -591,9 +615,25 @@ export function ControlModeScreen() {
         >
           <Card>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text variant="h2">Synthese inspection</Text>
+              <Text variant="h2">Résumé contrôle</Text>
               {loadingSummary ? <ActivityIndicator color={colors.teal} size="small" /> : null}
             </View>
+
+            {modeEnabled ? (
+              <View
+                style={{
+                  marginTop: spacing.sm,
+                  paddingHorizontal: spacing.md,
+                  paddingVertical: spacing.sm,
+                  borderRadius: radii.md,
+                  backgroundColor: colors.rose
+                }}
+              >
+                <Text variant="caption" style={{ color: colors.white }}>
+                  MODE CONTRÔLE ACTIF — lecture seule (preuves autorisées)
+                </Text>
+              </View>
+            ) : null}
 
             <View
               style={{
@@ -610,43 +650,45 @@ export function ControlModeScreen() {
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
               <Card style={{ flex: 1, minWidth: 130 }}>
-                <Text variant="caption" style={{ color: colors.slate }}>Taches ouvertes</Text>
-                <Text variant="h2">{summary?.openTasks ?? 0}</Text>
-              </Card>
-              <Card style={{ flex: 1, minWidth: 130 }}>
-                <Text variant="caption" style={{ color: colors.slate }}>Bloquees</Text>
+                <Text variant="caption" style={{ color: colors.slate }}>
+                  Tâches bloquées
+                </Text>
                 <Text variant="h2">{summary?.blockedTasks ?? 0}</Text>
               </Card>
               <Card style={{ flex: 1, minWidth: 130 }}>
-                <Text variant="caption" style={{ color: colors.slate }}>Preuves</Text>
-                <Text variant="h2">{summary?.mediaCount ?? 0}</Text>
+                <Text variant="caption" style={{ color: colors.slate }}>
+                  Sécurité ouvertes
+                </Text>
+                <Text variant="h2">{summary?.openSafetyTasks ?? 0}</Text>
               </Card>
               <Card style={{ flex: 1, minWidth: 130 }}>
-                <Text variant="caption" style={{ color: colors.slate }}>Documents</Text>
-                <Text variant="h2">{summary?.documentsCount ?? 0}</Text>
+                <Text variant="caption" style={{ color: colors.slate }}>
+                  Uploads preuves
+                </Text>
+                <Text variant="h2">{summary ? `${summary.pendingUploads}/${summary.failedUploads}` : '0/0'}</Text>
+                <Text variant="caption" style={{ color: colors.slate }}>
+                  attente / échec
+                </Text>
+              </Card>
+              <Card style={{ flex: 1, minWidth: 130 }}>
+                <Text variant="caption" style={{ color: colors.slate }}>
+                  Documents
+                </Text>
+                <Text variant="h2">{summary?.docsCount ?? 0}</Text>
               </Card>
             </View>
 
-            <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.sm }}>
-              Derniere activite: {formatDate(summary?.lastActivityAt)}
-            </Text>
-          </Card>
-
-          <Card>
-            <Text variant="h2">Actions rapides</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
-              <Button label={modeEnabled ? 'Desactiver lecture seule' : 'Activer lecture seule'} kind="ghost" onPress={confirmModeToggle} disabled={busy} />
-              <Button label="Pack controle 1 clic" onPress={generateControlPack} disabled={busy || loadingSummary} />
-              <Button label="Partager" kind="ghost" onPress={() => void shareControlPack()} disabled={!exportJob?.local_path || busy} />
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
+              <Button label="Voir preuves critiques" kind="ghost" onPress={openCriticalProofsTab} disabled={busy} />
+              <Button label="Générer pack contrôle" onPress={generateControlPack} disabled={busy || loadingSummary} />
+              <Button
+                label="Partager pack"
+                kind="ghost"
+                onPress={() => void shareControlPack()}
+                disabled={!exportJob?.local_path || busy}
+              />
               <Button label="Ajouter preuve" kind="ghost" onPress={captureProof} disabled={busy} />
-              <Button label="Afficher preuves critiques" kind="ghost" onPress={openCriticalProofsTab} disabled={busy} />
             </View>
-
-            {modeEnabled ? (
-              <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
-                Mode lecture seule actif: modifications verrouillees (ajout preuve autorise).
-              </Text>
-            ) : null}
 
             {exportJob ? (
               <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.sm }}>
@@ -656,71 +698,31 @@ export function ControlModeScreen() {
           </Card>
 
           <Card>
-            <Text variant="h2">Issues ouvertes</Text>
-            <View style={{ gap: spacing.xs, marginTop: spacing.sm }}>
-              {openIssues.slice(0, 10).map((task) => (
-                <View
-                  key={task.id}
-                  style={{
-                    borderWidth: 1,
-                    borderColor: colors.fog,
-                    borderRadius: radii.md,
-                    padding: spacing.sm
-                  }}
-                >
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
-                    <Text variant="bodyStrong" numberOfLines={1} style={{ flex: 1 }}>
-                      {task.title}
-                    </Text>
-                    <View
-                      style={{
-                        borderRadius: radii.pill,
-                        backgroundColor: taskStatusColor(task.status, colors),
-                        paddingHorizontal: spacing.sm,
-                        paddingVertical: spacing.xs
-                      }}
-                    >
-                      <Text variant="caption">{task.status}</Text>
-                    </View>
-                  </View>
-                  <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }} numberOfLines={2}>
-                    tags: {task.tags.join(', ') || 'aucun'}
-                  </Text>
-                </View>
-              ))}
-              {openIssues.length === 0 ? (
-                <Text variant="caption" style={{ color: colors.slate }}>
-                  Aucune issue ouverte.
-                </Text>
-              ) : null}
-            </View>
-          </Card>
+            <Text variant="h2">Mode contrôle</Text>
+            <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Active une lecture seule sur le chantier (tâches / documents / plans). Les preuves restent ajoutables.
+            </Text>
 
-          <Card>
-            <Text variant="h2">Dernieres activites</Text>
-            <View style={{ gap: spacing.xs, marginTop: spacing.sm }}>
-              {activity.map((item) => (
-                <View key={item.id}>
-                  <Text variant="caption" style={{ color: colors.slate }}>
-                    {item.entity} | {formatDate(item.at)}
-                  </Text>
-                  <Text variant="bodyStrong">{item.title}</Text>
-                  {item.subtitle ? <Text variant="caption" style={{ color: colors.slate }}>{item.subtitle}</Text> : null}
-                </View>
-              ))}
-              {activity.length === 0 ? (
-                <Text variant="caption" style={{ color: colors.slate }}>
-                  Aucune activite recente.
-                </Text>
-              ) : null}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
+              <Button
+                label={modeEnabled ? 'Désactiver' : 'Activer'}
+                kind={modeEnabled ? 'primary' : 'ghost'}
+                onPress={confirmModeToggle}
+                disabled={busy}
+              />
+              <Button label="Rafraîchir" kind="ghost" onPress={() => void refreshSummary()} disabled={busy} />
             </View>
           </Card>
 
           <Card>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text variant="h2">Checklist inspection</Text>
-              <Button label="Nouvelle checklist" kind="ghost" onPress={createNewChecklist} disabled={busy || modeEnabled} />
+              <Button label="Nouvelle inspection" kind="ghost" onPress={createNewChecklist} disabled={busy} />
             </View>
+
+            <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Score: {checklistScore.checked}/{checklistScore.total} · Dernière: {formatDate(checklist?.checklist.created_at)}
+            </Text>
 
             <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
               {checklist?.items.map((item) => (
@@ -735,7 +737,7 @@ export function ControlModeScreen() {
                 >
                   <Pressable
                     onPress={() => toggleChecklistItem(item)}
-                    disabled={busy || modeEnabled}
+                    disabled={busy}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}
                   >
                     <View
@@ -756,7 +758,7 @@ export function ControlModeScreen() {
                   <TextInput
                     value={commentDrafts[item.id] ?? item.comment ?? ''}
                     onChangeText={(value) => setCommentDrafts((current) => ({ ...current, [item.id]: value }))}
-                    editable={!modeEnabled && !busy}
+                    editable={!busy}
                     placeholder="Commentaire (optionnel)"
                     placeholderTextColor={colors.slate}
                     multiline
@@ -778,7 +780,7 @@ export function ControlModeScreen() {
                       label="Enregistrer commentaire"
                       kind="ghost"
                       onPress={() => saveChecklistComment(item.id)}
-                      disabled={modeEnabled || busy}
+                      disabled={busy}
                     />
                   </View>
 
@@ -787,6 +789,82 @@ export function ControlModeScreen() {
                   </Text>
                 </View>
               ))}
+            </View>
+          </Card>
+
+          <Card>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
+              <Text variant="h2">Preuves critiques</Text>
+              <Button label="Voir tout" kind="ghost" onPress={openCriticalProofsTab} disabled={busy} />
+            </View>
+
+            <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Thumbnails uniquement (safety, pins ouverts, tag "critical").
+            </Text>
+
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
+              {criticalPreview.length === 0 ? (
+                <Text variant="caption" style={{ color: colors.slate }}>
+                  Aucune preuve critique.
+                </Text>
+              ) : (
+                criticalPreview.slice(0, 9).map((asset) => (
+                  <Pressable key={asset.id} onPress={openCriticalProofsTab}>
+                    {isImage(asset) && asset.local_thumb_path ? (
+                      <Image
+                        source={{ uri: asset.local_thumb_path }}
+                        style={{ width: 96, height: 96, borderRadius: radii.sm }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View
+                        style={{
+                          width: 96,
+                          height: 96,
+                          borderRadius: radii.sm,
+                          backgroundColor: colors.fog,
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        <Text variant="caption" style={{ color: colors.slate }}>
+                          {asset.mime === 'application/pdf' ? 'PDF' : 'thumb'}
+                        </Text>
+                      </View>
+                    )}
+                  </Pressable>
+                ))
+              )}
+            </View>
+          </Card>
+
+          <Card>
+            <Text variant="h2">Historique inspections</Text>
+            <View style={{ gap: spacing.xs, marginTop: spacing.sm }}>
+              {inspections.slice(0, 10).map((inspection) => (
+                <View
+                  key={inspection.id}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: colors.fog,
+                    borderRadius: radii.md,
+                    padding: spacing.sm,
+                    backgroundColor: inspection.id === checklist?.checklist.id ? colors.mint : colors.white
+                  }}
+                >
+                  <Text variant="bodyStrong">
+                    {formatDate(inspection.created_at)} · {inspection.score_checked}/{inspection.score_total}
+                  </Text>
+                  <Text variant="caption" style={{ color: colors.slate }}>
+                    auteur: {inspection.created_by}
+                  </Text>
+                </View>
+              ))}
+              {inspections.length === 0 ? (
+                <Text variant="caption" style={{ color: colors.slate }}>
+                  Aucune inspection enregistrée.
+                </Text>
+              ) : null}
             </View>
           </Card>
 

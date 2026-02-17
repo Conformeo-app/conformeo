@@ -1,6 +1,8 @@
 import * as SQLite from 'expo-sqlite';
 import { MediaAsset, media } from '../media';
 import { offlineDB } from '../offline/outbox';
+import { assertProjectWritable } from '../control-mode/readOnly';
+import { geo } from '../geo-context';
 import { evaluateKeywordRules } from './rules';
 import {
   Task,
@@ -17,6 +19,9 @@ import {
 const DB_NAME = 'conformeo.db';
 const TASKS_TABLE = 'tasks';
 const COMMENTS_TABLE = 'task_comments';
+const MEDIA_TABLE = 'media_assets';
+const OPERATIONS_TABLE = 'operations_queue';
+const CONFLICTS_TABLE = 'sync_conflicts';
 const MAX_TASKS_PER_ORG = 5000;
 const DEFAULT_PAGE_SIZE = 25;
 
@@ -150,6 +155,20 @@ async function getDb() {
   }
 
   return dbPromise;
+}
+
+async function tableExists(db: SQLite.SQLiteDatabase, tableName: string) {
+  const row = await db.getFirstAsync<{ count: number }>(
+    `
+      SELECT COUNT(*) AS count
+      FROM sqlite_master
+      WHERE type = 'table'
+        AND name = ?
+    `,
+    tableName
+  );
+
+  return (row?.count ?? 0) > 0;
 }
 
 async function setupSchema() {
@@ -341,8 +360,8 @@ function mergeTaskPatch(task: Task, patch: TaskUpdatePatch): Task {
   };
 }
 
-function applyKeywordRules(task: Task) {
-  const outcome = evaluateKeywordRules(task);
+async function applyKeywordRules(task: Task) {
+  const outcome = await evaluateKeywordRules(task);
 
   return {
     ...task,
@@ -350,6 +369,99 @@ function applyKeywordRules(task: Task) {
     suggestions: outcome.suggestions,
     updated_at: nowIso()
   };
+}
+
+function clampLimit(value?: number) {
+  const fallback = DEFAULT_PAGE_SIZE;
+  const raw = value ?? fallback;
+  return Math.max(1, Math.min(raw, 200));
+}
+
+function normalizeQuery(value: string) {
+  return normalizeText(value).toLowerCase();
+}
+
+function makeLikePattern(value: string) {
+  const cleaned = normalizeQuery(value);
+  if (!cleaned) return null;
+  return `%${cleaned}%`;
+}
+
+async function queryTasksByProject(projectId: string, filters: TaskFilters, query?: string): Promise<Task[]> {
+  await ensureSetup();
+  const db = await getDb();
+
+  const limit = clampLimit(filters.limit);
+  const offset = Math.max(0, filters.offset ?? 0);
+
+  const where: string[] = ['t.project_id = ?'];
+  const params: Array<string | number> = [projectId];
+
+  if (filters.org_id) {
+    where.push('t.org_id = ?');
+    params.push(filters.org_id);
+  }
+
+  if (!filters.include_deleted) {
+    where.push('t.deleted_at IS NULL');
+  }
+
+  if (filters.status && filters.status !== 'ALL') {
+    where.push('t.status = ?');
+    params.push(filters.status);
+  }
+
+  if (filters.assignee_user_id) {
+    where.push('t.assignee_user_id = ?');
+    params.push(filters.assignee_user_id);
+  }
+
+  if (filters.safety) {
+    where.push(`(t.tags_json LIKE ? OR t.tags_json LIKE ?)`);
+    params.push(`%\"safety\"%`, `%\"permis_feu\"%`);
+  }
+
+  const expectedTags = normalizeTags(filters.tags);
+  for (const tag of expectedTags) {
+    where.push(`t.tags_json LIKE ?`);
+    params.push(`%\"${tag}\"%`);
+  }
+
+  const likePattern = query ? makeLikePattern(query) : null;
+  if (likePattern) {
+    where.push(`(LOWER(t.title) LIKE ? OR LOWER(COALESCE(t.description, '')) LIKE ?)`);
+    params.push(likePattern, likePattern);
+  }
+
+  if (filters.proofs === 'WITH' || filters.proofs === 'WITHOUT') {
+    const hasMedia = await tableExists(db, MEDIA_TABLE);
+    if (!hasMedia) {
+      if (filters.proofs === 'WITH') {
+        return [];
+      }
+    } else {
+      const clause =
+        filters.proofs === 'WITH'
+          ? `EXISTS (SELECT 1 FROM ${MEDIA_TABLE} m WHERE m.task_id = t.id LIMIT 1)`
+          : `NOT EXISTS (SELECT 1 FROM ${MEDIA_TABLE} m WHERE m.task_id = t.id LIMIT 1)`;
+      where.push(clause);
+    }
+  }
+
+  const rows = await db.getAllAsync<TaskRow>(
+    `
+      SELECT t.*
+      FROM ${TASKS_TABLE} t
+      WHERE ${where.join(' AND ')}
+      ORDER BY t.updated_at DESC
+      LIMIT ? OFFSET ?
+    `,
+    ...params,
+    limit,
+    offset
+  );
+
+  return rows.map(mapTaskRow);
 }
 
 export const tasks = {
@@ -371,6 +483,8 @@ export const tasks = {
     if (createdBy.length === 0) {
       throw new Error('created_by est requis.');
     }
+
+    await assertProjectWritable(orgId, projectId);
 
     const count = await countActiveTasksByOrg(orgId);
     if (count >= MAX_TASKS_PER_ORG) {
@@ -405,11 +519,19 @@ export const tasks = {
       throw new Error(`Priorité invalide: ${baseTask.priority}`);
     }
 
-    const finalTask = applyKeywordRules(baseTask);
+    const finalTask = await applyKeywordRules(baseTask);
     await saveTask(finalTask);
 
     await enqueueTaskOperation(finalTask, 'CREATE', {
       data: finalTask
+    });
+
+    void geo.capture({
+      entity: 'TASK',
+      entity_id: finalTask.id,
+      org_id: finalTask.org_id,
+      user_id: finalTask.created_by,
+      project_id: finalTask.project_id
     });
 
     return finalTask;
@@ -417,8 +539,9 @@ export const tasks = {
 
   async update(id: string, patch: TaskUpdatePatch): Promise<Task> {
     const current = await ensureTaskExists(id);
+    await assertProjectWritable(current.org_id, current.project_id);
     const merged = mergeTaskPatch(current, patch);
-    const finalTask = applyKeywordRules(merged);
+    const finalTask = await applyKeywordRules(merged);
 
     await saveTask(finalTask);
 
@@ -436,6 +559,7 @@ export const tasks = {
 
   async softDelete(id: string): Promise<void> {
     const current = await ensureTaskExists(id);
+    await assertProjectWritable(current.org_id, current.project_id);
 
     if (current.deleted_at) {
       return;
@@ -461,68 +585,16 @@ export const tasks = {
   },
 
   async listByProject(projectId: string, filters: TaskFilters = {}): Promise<Task[]> {
-    await ensureSetup();
-    const db = await getDb();
+    return queryTasksByProject(projectId, filters);
+  },
 
-    const limit = Math.max(1, Math.min(filters.limit ?? DEFAULT_PAGE_SIZE, 200));
-    const offset = Math.max(0, filters.offset ?? 0);
-
-    const where: string[] = ['project_id = ?'];
-    const params: Array<string | number> = [projectId];
-
-    if (filters.org_id) {
-      where.push('org_id = ?');
-      params.push(filters.org_id);
+  async searchByProject(projectId: string, q: string, filters: TaskFilters = {}): Promise<Task[]> {
+    const cleaned = normalizeText(q);
+    if (!cleaned) {
+      return queryTasksByProject(projectId, filters);
     }
 
-    if (!filters.include_deleted) {
-      where.push('deleted_at IS NULL');
-    }
-
-    if (filters.status && filters.status !== 'ALL') {
-      where.push('status = ?');
-      params.push(filters.status);
-    }
-
-    if (filters.assignee_user_id) {
-      where.push('assignee_user_id = ?');
-      params.push(filters.assignee_user_id);
-    }
-
-    if (!filters.tags || filters.tags.length === 0) {
-      const rows = await db.getAllAsync<TaskRow>(
-        `
-          SELECT *
-          FROM ${TASKS_TABLE}
-          WHERE ${where.join(' AND ')}
-          ORDER BY updated_at DESC
-          LIMIT ? OFFSET ?
-        `,
-        ...params,
-        limit,
-        offset
-      );
-
-      return rows.map(mapTaskRow);
-    }
-
-    const rows = await db.getAllAsync<TaskRow>(
-      `
-        SELECT *
-        FROM ${TASKS_TABLE}
-        WHERE ${where.join(' AND ')}
-        ORDER BY updated_at DESC
-      `,
-      ...params
-    );
-
-    const expectedTags = normalizeTags(filters.tags);
-
-    const filtered = rows
-      .map(mapTaskRow)
-      .filter((task) => expectedTags.every((tag) => task.tags.includes(tag)));
-
-    return filtered.slice(offset, offset + limit);
+    return queryTasksByProject(projectId, filters, cleaned);
   },
 
   async addMedia(taskId: string, mediaContext: TaskMediaContext): Promise<MediaAsset> {
@@ -553,6 +625,7 @@ export const tasks = {
 
   async addComment(taskId: string, text: string): Promise<TaskComment> {
     const task = await ensureTaskExists(taskId);
+    await assertProjectWritable(task.org_id, task.project_id);
     const commentText = normalizeText(text);
 
     if (commentText.length === 0) {
@@ -626,16 +699,20 @@ export const tasks = {
     return rows.map(mapCommentRow);
   },
 
-  async runKeywordRules(task: Task): Promise<Task> {
+  async runKeywordRules(task: Task): Promise<{ tagsAdded: string[]; suggestions: TaskSuggestion[] }> {
     const current = await ensureTaskExists(task.id);
-    const next = applyKeywordRules({ ...current, ...task, id: current.id, updated_at: nowIso() });
+    await assertProjectWritable(current.org_id, current.project_id);
+    const next = await applyKeywordRules({ ...current, ...task, id: current.id, updated_at: nowIso() });
 
     const hasChanges =
       JSON.stringify(current.tags) !== JSON.stringify(next.tags) ||
       JSON.stringify(current.suggestions) !== JSON.stringify(next.suggestions);
 
     if (!hasChanges) {
-      return current;
+      return {
+        tagsAdded: [],
+        suggestions: (current.suggestions ?? []).filter((item) => !item.dismissed_at)
+      };
     }
 
     await saveTask(next);
@@ -645,7 +722,143 @@ export const tasks = {
       data: next
     });
 
-    return next;
+    const previousTags = new Set(current.tags ?? []);
+    const tagsAdded = (next.tags ?? []).filter((tag) => !previousTags.has(tag));
+    return { tagsAdded, suggestions: (next.suggestions ?? []).filter((item) => !item.dismissed_at) };
+  },
+
+  async getSuggestions(taskId: string): Promise<TaskSuggestion[]> {
+    const current = await ensureTaskExists(taskId);
+    return (current.suggestions ?? []).filter((item) => !item.dismissed_at);
+  },
+
+  async dismissSuggestion(taskId: string, suggestionKey: string): Promise<TaskSuggestion[]> {
+    const current = await ensureTaskExists(taskId);
+    await assertProjectWritable(current.org_id, current.project_id);
+    const suggestions = current.suggestions ?? [];
+
+    const updated = suggestions.map((item) => {
+      if (item.id !== suggestionKey) return item;
+      if (item.dismissed_at) return item;
+      return { ...item, dismissed_at: nowIso() };
+    });
+
+    const changed = JSON.stringify(updated) !== JSON.stringify(suggestions);
+    if (!changed) {
+      return suggestions.filter((item) => !item.dismissed_at);
+    }
+
+    const next: Task = { ...current, suggestions: updated, updated_at: nowIso() };
+    await saveTask(next);
+
+    await enqueueTaskOperation(next, 'UPDATE', {
+      patch: { suggestions: updated },
+      data: next
+    });
+
+    return updated.filter((item) => !item.dismissed_at);
+  },
+
+  async addPhoto(taskId: string): Promise<MediaAsset> {
+    const task = await ensureTaskExists(taskId);
+    return this.addMedia(taskId, {
+      org_id: task.org_id,
+      project_id: task.project_id,
+      source: 'capture',
+      tag: 'preuve_tache'
+    });
+  },
+
+  async getProofCounts(taskIds: string[]): Promise<Record<string, number>> {
+    await ensureSetup();
+    const db = await getDb();
+
+    const ids = taskIds.map((id) => normalizeText(id)).filter((id) => id.length > 0);
+    if (ids.length === 0) {
+      return {};
+    }
+
+    const hasMedia = await tableExists(db, MEDIA_TABLE);
+    if (!hasMedia) {
+      return {};
+    }
+
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = await db.getAllAsync<{ task_id: string; count: number }>(
+      `
+        SELECT task_id, COUNT(*) AS count
+        FROM ${MEDIA_TABLE}
+        WHERE task_id IN (${placeholders})
+        GROUP BY task_id
+      `,
+      ...ids
+    );
+
+    return Object.fromEntries(rows.map((row) => [row.task_id, Number(row.count ?? 0) || 0]));
+  },
+
+  async getSyncBadges(taskIds: string[], orgId?: string): Promise<Record<string, 'SYNCED' | 'PENDING' | 'ERROR'>> {
+    await ensureSetup();
+    const db = await getDb();
+
+    const ids = taskIds.map((id) => normalizeText(id)).filter((id) => id.length > 0);
+    if (ids.length === 0) {
+      return {};
+    }
+
+    const badges: Record<string, 'SYNCED' | 'PENDING' | 'ERROR'> = {};
+    for (const id of ids) {
+      badges[id] = 'SYNCED';
+    }
+
+    if (await tableExists(db, OPERATIONS_TABLE)) {
+      const placeholders = ids.map(() => '?').join(',');
+      const rows = await db.getAllAsync<{ entity_id: string; status: string; count: number }>(
+        `
+          SELECT entity_id, status, COUNT(*) AS count
+          FROM ${OPERATIONS_TABLE}
+          WHERE entity = 'tasks'
+            AND status IN ('PENDING', 'FAILED')
+            AND entity_id IN (${placeholders})
+          GROUP BY entity_id, status
+        `,
+        ...ids
+      );
+
+      for (const row of rows) {
+        if (!row.entity_id) continue;
+        if (row.status === 'FAILED') {
+          badges[row.entity_id] = 'ERROR';
+        } else if (row.status === 'PENDING' && badges[row.entity_id] !== 'ERROR') {
+          badges[row.entity_id] = 'PENDING';
+        }
+      }
+    }
+
+    const resolvedOrgId = normalizeText(orgId);
+    if (resolvedOrgId && (await tableExists(db, CONFLICTS_TABLE))) {
+      const placeholders = ids.map(() => '?').join(',');
+      const rows = await db.getAllAsync<{ entity_id: string; count: number }>(
+        `
+          SELECT entity_id, COUNT(*) AS count
+          FROM ${CONFLICTS_TABLE}
+          WHERE status = 'OPEN'
+            AND org_id = ?
+            AND entity = 'tasks'
+            AND entity_id IN (${placeholders})
+          GROUP BY entity_id
+        `,
+        resolvedOrgId,
+        ...ids
+      );
+
+      for (const row of rows) {
+        if (!row.entity_id) continue;
+        badges[row.entity_id] = 'ERROR';
+      }
+    }
+
+    return badges;
   },
 
   async countByOrg(orgId: string) {

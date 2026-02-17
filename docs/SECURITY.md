@@ -30,3 +30,9 @@
 - Hermes + obfuscation build
 - Pas de logs sensibles, debug off en prod
 - Source maps non publiques
+
+## Hardening opérationnel
+- Voir `docs/SECURITY_HARDENING.md` pour:
+  - checks runtime (`security.getBuildIntegrity`, `assertSecureEnvironment`)
+  - configuration Metro/EAS
+  - pipeline CI/CD de vérification

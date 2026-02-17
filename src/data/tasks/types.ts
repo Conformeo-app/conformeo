@@ -10,6 +10,7 @@ export type TaskSuggestion = {
   type: TaskSuggestionType;
   value: string;
   created_at: string;
+  dismissed_at?: string;
 };
 
 export type Task = {
@@ -61,6 +62,8 @@ export type TaskFilters = {
   status?: TaskStatus | 'ALL';
   assignee_user_id?: string;
   tags?: string[];
+  safety?: boolean;
+  proofs?: 'WITH' | 'WITHOUT';
   limit?: number;
   offset?: number;
   include_deleted?: boolean;

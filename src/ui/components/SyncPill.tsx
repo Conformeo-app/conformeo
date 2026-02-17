@@ -14,10 +14,10 @@ function toLabel(phase: SyncPhase) {
 }
 
 function toColor(phase: SyncPhase) {
-  if (phase === 'syncing') return { bg: '#E6F5F7', text: '#1B9AAA' };
-  if (phase === 'offline') return { bg: '#FFF4E8', text: '#B35A00' };
-  if (phase === 'error') return { bg: '#FCEBEC', text: '#D64550' };
-  return { bg: '#E8F5EC', text: '#228B5A' };
+  if (phase === 'syncing') return { bgKey: 'infoBg', textKey: 'info' } as const;
+  if (phase === 'offline') return { bgKey: 'warningBg', textKey: 'warningText' } as const;
+  if (phase === 'error') return { bgKey: 'dangerBg', textKey: 'danger' } as const;
+  return { bgKey: 'successBg', textKey: 'success' } as const;
 }
 
 function formatLastResult(result: SyncRunResult | null) {
@@ -46,12 +46,15 @@ export function SyncPill({
   const palette = toColor(phase);
   const resultSummary = formatLastResult(lastResult);
 
+  const toneBg = colors[palette.bgKey] ?? colors.fog;
+  const toneText = (colors as unknown as Record<string, string>)[palette.textKey] ?? colors.text;
+
   return (
     <View
       style={{
-        backgroundColor: colors.white,
+        backgroundColor: colors.surface,
         borderWidth: 1,
-        borderColor: colors.fog,
+        borderColor: colors.border,
         borderRadius: radii.md,
         padding: spacing.sm,
         marginBottom: spacing.md
@@ -60,14 +63,14 @@ export function SyncPill({
       <View
         style={{
           alignSelf: 'flex-start',
-          backgroundColor: palette.bg,
+          backgroundColor: toneBg,
           borderRadius: radii.pill,
           paddingHorizontal: spacing.sm,
           paddingVertical: 4,
           marginBottom: spacing.xs
         }}
       >
-        <Text variant="caption" style={{ color: palette.text }}>
+        <Text variant="caption" style={{ color: toneText }}>
           {toLabel(phase)}
         </Text>
       </View>

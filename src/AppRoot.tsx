@@ -1,67 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, useWindowDimensions, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from './core/auth';
-import { ModuleKey, modules as coreModules } from './core/modules';
-import { flags } from './data/feature-flags';
-import { useSyncStatus } from './data/sync/useSyncStatus';
+import { appEnv } from './core/env';
+import { security } from './core/security/hardening';
+import { AppShell } from './app/AppShell';
 import { AdminMfaEnrollmentScreen } from './features/auth/AdminMfaEnrollmentScreen';
 import { AuthAccessScreen } from './features/auth/AuthAccessScreen';
-import { ControlModeScreen } from './features/control/ControlModeScreen';
-import { ConflictsScreen } from './features/conflicts/ConflictsScreen';
-import { DashboardScreen } from './features/dashboard/DashboardScreen';
-import { DocumentsScreen } from './features/documents/DocumentsScreen';
-import { ExportsScreen } from './features/exports/ExportsScreen';
-import { MediaScreen } from './features/media/MediaScreen';
-import { OfflineScreen } from './features/offline/OfflineScreen';
-import { OrgsAdminScreen } from './features/orgs/OrgsAdminScreen';
-import { PlansScreen } from './features/plans/PlansScreen';
-import { SearchScreen } from './features/search/SearchScreen';
-import { SecurityScreen } from './features/security/SecurityScreen';
-import { UxAcceleratorsScreen } from './features/ux/UxAcceleratorsScreen';
-import { TasksScreen } from './features/tasks/TasksScreen';
-import { Sidebar } from './ui/components/Sidebar';
+import { EnabledModulesProvider } from './navigation/EnabledModulesProvider';
 import { Text } from './ui/components/Text';
-import { SplitLayout } from './ui/layout/SplitLayout';
 import { ThemeProvider, useTheme } from './ui/theme/ThemeProvider';
-
-const MIN_WIDE_LAYOUT_WIDTH = 1024;
-const ALL_MODULE_KEYS = coreModules.map((item) => item.key);
-
-const moduleToScreen: Record<ModuleKey, React.ComponentType> = {
-  dashboard: DashboardScreen,
-  accelerators: UxAcceleratorsScreen,
-  orgs: OrgsAdminScreen,
-  tasks: TasksScreen,
-  documents: DocumentsScreen,
-  exports: ExportsScreen,
-  control: ControlModeScreen,
-  search: SearchScreen,
-  offline: OfflineScreen,
-  conflicts: ConflictsScreen,
-  media: MediaScreen,
-  plans: PlansScreen,
-  security: SecurityScreen
-};
-
-function computeEnabledModules(rows: Array<{ key: string; enabled: boolean }>): ModuleKey[] {
-  const rowMap = new Map<string, boolean>(rows.map((item) => [item.key, item.enabled]));
-
-  const enabled = coreModules
-    .filter((module) => {
-      if (!rowMap.has(module.key)) {
-        return true;
-      }
-      return rowMap.get(module.key) === true;
-    })
-    .map((module) => module.key);
-
-  if (enabled.length === 0) {
-    return ['dashboard'];
-  }
-
-  return enabled;
-}
+import { UIHost } from './ui/runtime/UIHost';
 
 function LoadingView() {
   const { colors, spacing } = useTheme();
@@ -75,49 +24,55 @@ function LoadingView() {
   );
 }
 
-function MainShell() {
-  const { width } = useWindowDimensions();
-  const { status } = useSyncStatus();
-  const { activeOrgId, user } = useAuth();
+function InsecureEnvironmentView({ reason }: { reason: string }) {
+  const { colors, spacing } = useTheme();
 
-  const [activeModule, setActiveModule] = useState<ModuleKey>('dashboard');
-  const [availableModules, setAvailableModules] = useState<ModuleKey[]>(ALL_MODULE_KEYS);
+  return (
+    <View style={{ flex: 1, padding: spacing.lg, justifyContent: 'center' }}>
+      <Text variant="h2">Environnement non sécurisé</Text>
+      <Text variant="body" style={{ color: colors.slate, marginTop: spacing.sm }}>
+        Cette build bloque l’exécution hors environnement sûr.
+      </Text>
+      <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
+        {reason}
+      </Text>
+    </View>
+  );
+}
 
-  const isWide = width >= MIN_WIDE_LAYOUT_WIDTH;
+export function AppRoot() {
+  const { loading, session, hasMembership, requiresMfaEnrollment } = useAuth();
+  const [integrityChecked, setIntegrityChecked] = useState(!appEnv.hardeningBlockUnsafe);
+  const [integrityError, setIntegrityError] = useState<string | null>(null);
 
   useEffect(() => {
-    flags.setContext({
-      org_id: activeOrgId ?? undefined,
-      user_id: user?.id ?? undefined
-    });
-
     let cancelled = false;
 
-    const applyRows = (rows: Array<{ key: string; enabled: boolean }>) => {
-      if (cancelled) {
-        return;
-      }
-      setAvailableModules(computeEnabledModules(rows));
-    };
+    if (!appEnv.hardeningBlockUnsafe) {
+      setIntegrityChecked(true);
+      setIntegrityError(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setIntegrityChecked(false);
 
     const run = async () => {
-      if (!activeOrgId) {
-        setAvailableModules(ALL_MODULE_KEYS);
-        return;
-      }
-
       try {
-        const cached = await flags.listAll(activeOrgId);
-        applyRows(cached);
-      } catch {
-        setAvailableModules(ALL_MODULE_KEYS);
-      }
-
-      try {
-        const refreshed = await flags.refresh(activeOrgId);
-        applyRows(refreshed);
-      } catch {
-        // Keep cached/default state when refresh fails.
+        await security.assertSecureEnvironment({ strictMode: true });
+        if (!cancelled) {
+          setIntegrityError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : 'Build integrity check failed';
+          setIntegrityError(message);
+        }
+      } finally {
+        if (!cancelled) {
+          setIntegrityChecked(true);
+        }
       }
     };
 
@@ -126,49 +81,26 @@ function MainShell() {
     return () => {
       cancelled = true;
     };
-  }, [activeOrgId, user?.id]);
-
-  useEffect(() => {
-    if (availableModules.includes(activeModule)) {
-      return;
-    }
-
-    setActiveModule(availableModules[0] ?? 'dashboard');
-  }, [activeModule, availableModules]);
-
-  const ActiveScreen = useMemo(() => moduleToScreen[activeModule], [activeModule]);
-
-  return (
-    <SplitLayout
-      isWide={isWide}
-      sidebar={
-        <Sidebar
-          active={activeModule}
-          onSelect={setActiveModule}
-          compact={!isWide}
-          syncStatus={status}
-          availableModules={availableModules}
-        />
-      }
-      content={<ActiveScreen />}
-    />
-  );
-}
-
-export function AppRoot() {
-  const { loading, session, hasMembership, requiresMfaEnrollment } = useAuth();
+  }, [session?.access_token]);
 
   return (
     <ThemeProvider>
       <SafeAreaView style={{ flex: 1 }}>
-        {loading ? (
+        <UIHost />
+        {!integrityChecked ? (
+          <LoadingView />
+        ) : integrityError ? (
+          <InsecureEnvironmentView reason={integrityError} />
+        ) : loading ? (
           <LoadingView />
         ) : !session || hasMembership === false ? (
           <AuthAccessScreen />
         ) : requiresMfaEnrollment ? (
           <AdminMfaEnrollmentScreen />
         ) : (
-          <MainShell />
+          <EnabledModulesProvider>
+            <AppShell />
+          </EnabledModulesProvider>
         )}
       </SafeAreaView>
     </ThemeProvider>

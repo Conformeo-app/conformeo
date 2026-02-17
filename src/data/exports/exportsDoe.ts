@@ -5,6 +5,7 @@ import JSZip from 'jszip';
 import { Document, documents, DocumentVersion } from '../documents';
 import { media, MediaAsset } from '../media';
 import { offlineDB } from '../offline/outbox';
+import { quotas } from '../quotas-limits';
 import { Task, tasks } from '../tasks';
 import {
   ExportContext,
@@ -1113,9 +1114,21 @@ export const exportsDoe = {
       throw new Error('projectId est requis.');
     }
 
-    const exportsToday = await countExportsToday(context.org_id);
-    if (exportsToday >= MAX_EXPORTS_PER_DAY) {
-      throw new Error(`Quota depasse: max ${MAX_EXPORTS_PER_DAY} exports/jour.`);
+    const [exportsToday, quotaRow] = await Promise.all([
+      countExportsToday(context.org_id),
+      quotas.get()
+    ])
+
+    const rawLimit = Number(quotaRow.exports_per_day)
+    let maxPerDay = MAX_EXPORTS_PER_DAY
+    if (Number.isFinite(rawLimit)) {
+      if (rawLimit > 0) {
+        maxPerDay = Math.floor(rawLimit)
+      }
+    }
+
+    if (exportsToday >= maxPerDay) {
+      throw new Error('Quota depasse: max ' + maxPerDay + ' exports/jour.')
     }
 
     const createdAt = nowIso();
@@ -1134,8 +1147,8 @@ export const exportsDoe = {
       retry_count: 0,
       last_error: null
     };
-
     await upsertJobRow(row);
+    void quotas.recordExportCreated();
 
     const mapped = mapJobRow(row);
     await enqueueJobOperation(mapped, 'CREATE');

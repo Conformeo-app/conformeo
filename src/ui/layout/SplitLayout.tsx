@@ -15,7 +15,7 @@ export function SplitLayout({
 
   if (!isWide) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.sand }}>
+      <View style={{ flex: 1, backgroundColor: colors.bg }}>
         <View>{sidebar}</View>
         <View style={{ flex: 1, minHeight: 0 }}>{content}</View>
       </View>
@@ -23,7 +23,7 @@ export function SplitLayout({
   }
 
   return (
-    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: colors.sand }}>
+    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: colors.bg }}>
       <View style={{ width: 280 }}>{sidebar}</View>
       <View style={{ flex: 1, minHeight: 0 }}>{content}</View>
     </View>

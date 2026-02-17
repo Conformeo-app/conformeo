@@ -1,7 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 import { ModuleKey } from '../../core/modules';
 import { securityPolicies } from '../../core/security/policies';
-import { exportsDoe } from '../exports';
+import { quotas } from '../quotas-limits';
 import { media } from '../media';
 import {
   DashboardActivity,
@@ -32,6 +32,7 @@ const DOCUMENTS_TABLE = 'documents';
 const MEDIA_TABLE = 'media_assets';
 const EXPORTS_TABLE = 'export_jobs';
 const OPERATIONS_TABLE = 'operations_queue';
+const CERTIFICATIONS_TABLE = 'certifications';
 
 const SAFETY_KEYWORDS = ['safety', 'securite', 'permis_feu', 'permis feu', 'epi', 'harnais', 'risque'];
 const PREFS_VERSION = 1;
@@ -460,6 +461,29 @@ async function countDocuments(db: SQLite.SQLiteDatabase, scope: DashboardScope) 
   return row?.count ?? 0;
 }
 
+
+async function countExpiringCertifications(db: SQLite.SQLiteDatabase, scope: DashboardScope) {
+  if (!(await tableExists(db, CERTIFICATIONS_TABLE))) {
+    return 0;
+  }
+
+  const horizonIso = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString();
+
+  const row = await db.getFirstAsync<CountRow>(
+    `
+      SELECT COUNT(*) AS count
+      FROM ${CERTIFICATIONS_TABLE}
+      WHERE org_id = ?
+        AND valid_to IS NOT NULL
+        AND valid_to <= ?
+    `,
+    scope.orgId,
+    horizonIso
+  );
+
+  return row?.count ?? 0;
+}
+
 async function countRecentExports(db: SQLite.SQLiteDatabase, scope: DashboardScope) {
   if (!(await tableExists(db, EXPORTS_TABLE))) {
     return 0;
@@ -478,30 +502,6 @@ async function countRecentExports(db: SQLite.SQLiteDatabase, scope: DashboardSco
     `,
     scope.orgId,
     sinceIso,
-    ...project.params
-  );
-
-  return row?.count ?? 0;
-}
-
-async function countExportsToday(db: SQLite.SQLiteDatabase, scope: DashboardScope) {
-  if (!(await tableExists(db, EXPORTS_TABLE))) {
-    return 0;
-  }
-
-  const startIso = startOfDayIso();
-  const project = projectScopeClause(scope);
-
-  const row = await db.getFirstAsync<CountRow>(
-    `
-      SELECT COUNT(*) AS count
-      FROM ${EXPORTS_TABLE}
-      WHERE org_id = ?
-        AND created_at >= ?
-        ${project.clause}
-    `,
-    scope.orgId,
-    startIso,
     ...project.params
   );
 
@@ -723,7 +723,9 @@ function buildAlerts(input: {
   syncFailedOps: number;
   safetyOpenTasks: number;
   uploadQueue: number;
-  exportsToday: number;
+  expiringCertifications: number;
+  quotaRow: { storage_mb: number; exports_per_day: number; media_per_day: number };
+  usageRow: { storage_used_mb: number; exports_today: number; media_today: number };
 }) {
   const alerts: DashboardAlert[] = [];
 
@@ -755,18 +757,88 @@ function buildAlerts(input: {
     });
   }
 
-  const exportsWarnThreshold = Math.floor(exportsDoe.config.maxExportsPerDay * 0.8);
-  if (input.exportsToday >= exportsWarnThreshold && input.exportsToday > 0) {
+  if (input.expiringCertifications > 0) {
     alerts.push({
-      code: 'EXPORT_DAILY_QUOTA',
+      code: 'CERTIFICATIONS_EXPIRING',
       level: 'WARN',
-      value: input.exportsToday,
-      message: `Quota exports proche (${input.exportsToday}/${exportsDoe.config.maxExportsPerDay} aujourd'hui).`
+      value: input.expiringCertifications,
+      message: `${input.expiringCertifications} certification(s) à échéance <= 60 jours.`
     });
+  }
+
+  const storageLimit = Math.max(0, Number(input.quotaRow.storage_mb) || 0);
+  const storageUsed = Math.max(0, Number(input.usageRow.storage_used_mb) || 0);
+
+  if (storageLimit > 0) {
+    const ratio = storageLimit === 0 ? 0 : storageUsed / storageLimit;
+    const pct = Math.round(ratio * 100);
+
+    if (ratio >= 0.95) {
+      alerts.push({
+        code: 'STORAGE_QUOTA',
+        level: 'ERROR',
+        value: pct,
+        message: `Stockage presque plein (${pct}% - ${Math.ceil(storageUsed)}/${storageLimit} MB).`
+      });
+    } else if (ratio >= 0.8) {
+      alerts.push({
+        code: 'STORAGE_QUOTA',
+        level: 'WARN',
+        value: pct,
+        message: `Stockage a surveiller (${pct}% - ${Math.ceil(storageUsed)}/${storageLimit} MB).`
+      });
+    }
+  }
+
+  const exportsLimit = Math.max(0, Math.floor(Number(input.quotaRow.exports_per_day) || 0));
+  const exportsToday = Math.max(0, Math.floor(Number(input.usageRow.exports_today) || 0));
+
+  if (exportsLimit > 0) {
+    const exportsWarnThreshold = Math.floor(exportsLimit * 0.8);
+
+    if (exportsToday >= exportsLimit && exportsToday > 0) {
+      alerts.push({
+        code: 'EXPORT_DAILY_QUOTA',
+        level: 'ERROR',
+        value: exportsToday,
+        message: `Quota exports atteint (${exportsToday}/${exportsLimit} aujourd'hui).`
+      });
+    } else if (exportsToday >= exportsWarnThreshold && exportsToday > 0) {
+      alerts.push({
+        code: 'EXPORT_DAILY_QUOTA',
+        level: 'WARN',
+        value: exportsToday,
+        message: `Quota exports proche (${exportsToday}/${exportsLimit} aujourd'hui).`
+      });
+    }
+  }
+
+  const mediaLimit = Math.max(0, Math.floor(Number(input.quotaRow.media_per_day) || 0));
+  const mediaToday = Math.max(0, Math.floor(Number(input.usageRow.media_today) || 0));
+
+  if (mediaLimit > 0) {
+    const mediaWarnThreshold = Math.floor(mediaLimit * 0.8);
+
+    if (mediaToday >= mediaLimit && mediaToday > 0) {
+      alerts.push({
+        code: 'MEDIA_DAILY_QUOTA',
+        level: 'ERROR',
+        value: mediaToday,
+        message: `Quota medias/jour atteint (${mediaToday}/${mediaLimit} aujourd'hui).`
+      });
+    } else if (mediaToday >= mediaWarnThreshold && mediaToday > 0) {
+      alerts.push({
+        code: 'MEDIA_DAILY_QUOTA',
+        level: 'WARN',
+        value: mediaToday,
+        message: `Quota medias/jour proche (${mediaToday}/${mediaLimit} aujourd'hui).`
+      });
+    }
   }
 
   return alerts;
 }
+
 
 function toActivity(entity: DashboardActivityEntity, id: string, at: string, title: string, subtitle?: string, projectId?: string) {
   return {
@@ -1110,6 +1182,8 @@ export const dashboard: DashboardApi = {
     contextOrgId = normalizeText(context.org_id) || null;
     contextUserId = normalizeText(context.user_id) || null;
     contextProjectId = normalizeText(context.project_id) || null;
+
+    quotas.setContext({ org_id: contextOrgId ?? undefined, user_id: contextUserId ?? undefined });
   },
 
   setOrg(orgId: string | null) {
@@ -1162,8 +1236,10 @@ export const dashboard: DashboardApi = {
       syncPendingOps,
       syncFailedOps,
       safetyOpenTasks,
+      expiringCertifications,
       uploadQueue,
-      exportsToday,
+      quotaRow,
+      usageRow,
       openTaskPreviews,
       blockedTaskPreviews,
       latestProofs,
@@ -1179,8 +1255,10 @@ export const dashboard: DashboardApi = {
       countSyncPending(db, resolvedScope),
       countSyncFailed(db, resolvedScope),
       countSafetyOpenTasks(db, resolvedScope),
+      countExpiringCertifications(db, resolvedScope),
       countUploadQueue(db, resolvedScope),
-      countExportsToday(db, resolvedScope),
+      quotas.get(),
+      quotas.getUsage(),
       listTaskPreviews(db, resolvedScope, `status != 'DONE'`, PREVIEW_LIMIT),
       listTaskPreviews(db, resolvedScope, `status = 'BLOCKED'`, PREVIEW_LIMIT),
       listLatestProofs(db, resolvedScope, PREVIEW_LIMIT),
@@ -1200,11 +1278,14 @@ export const dashboard: DashboardApi = {
       syncPendingOps,
       syncFailedOps,
       safetyOpenTasks,
+      expiringCertifications,
       alerts: buildAlerts({
         syncFailedOps,
         safetyOpenTasks,
+        expiringCertifications,
         uploadQueue,
-        exportsToday
+        quotaRow,
+        usageRow
       }),
       openTaskPreviews,
       blockedTaskPreviews,

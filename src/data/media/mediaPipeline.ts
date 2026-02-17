@@ -5,6 +5,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as SQLite from 'expo-sqlite';
 import { Image } from 'react-native';
 import { securityPolicies } from '../../core/security/policies';
+import { geo } from '../geo-context';
+import { quotas } from '../quotas-limits';
 import { MediaAsset, MediaContext, MediaListFilters, MediaMime, MediaProcessConfig } from './types';
 
 const DB_NAME = 'conformeo.db';
@@ -407,6 +409,17 @@ async function createLocalAssetFromImportedFile(context: MediaContext, file: Imp
     );
   }
 
+  const pendingCount = await media.countPendingUploads();
+  if (pendingCount >= MEDIA_CONFIG.maxPendingUploads) {
+    throw new Error("Limite file d'upload atteinte (" + MEDIA_CONFIG.maxPendingUploads + " medias en attente).");
+  }
+
+  const sizeMb = sourceSize / 1024 / 1024;
+  const uploadBlockReason = await quotas.explainUploadBlock(sizeMb);
+  if (uploadBlockReason) {
+    throw new Error(uploadBlockReason);
+  }
+
   await FileSystem.copyAsync({ from: file.uri, to: targetOriginalPath });
 
   const finalSize = await getFileSize(targetOriginalPath);
@@ -431,8 +444,14 @@ async function createLocalAssetFromImportedFile(context: MediaContext, file: Imp
     created_at: createdAt,
     retry_count: 0
   };
-
   await saveAsset(asset);
+  void quotas.recordMediaCreated();
+  void geo.capture({
+    entity: 'MEDIA',
+    entity_id: asset.id,
+    org_id: asset.org_id,
+    project_id: asset.project_id
+  });
   return asset;
 }
 
@@ -537,6 +556,11 @@ async function cleanupOldExports() {
 export const media = {
   config: MEDIA_CONFIG,
 
+  // Optional context for UI helpers (does not affect capture/import which always require explicit org_id).
+  setContext(_context: { org_id?: string; user_id?: string }) {
+    // Intentionally no-op for now. Keep API surface stable for future audit fields (created_by, etc.).
+  },
+
   async capturePhoto(context: MediaContext) {
     await ensureSetup();
 
@@ -599,6 +623,29 @@ export const media = {
     return assets;
   },
 
+
+
+  async registerGeneratedFile(context: MediaContext, file: ImportedFile & { tag?: string }) {
+    await ensureSetup();
+
+    const asset = await createLocalAssetFromImportedFile(
+      {
+        ...context,
+        tag: file.tag ?? context.tag
+      },
+      {
+        uri: file.uri,
+        mimeType: file.mimeType,
+        fileName: file.fileName,
+        fileSize: file.fileSize,
+        width: file.width,
+        height: file.height
+      }
+    );
+
+    scheduleBackgroundProcess(asset.id);
+    return asset;
+  },
   async process(assetId: string) {
     const asset = await getByIdInternal(assetId);
     if (!asset) {
@@ -709,6 +756,59 @@ export const media = {
     return getByIdInternal(id);
   },
 
+  async updateMeta(id: string, patch: Partial<Pick<MediaAsset, 'project_id' | 'task_id' | 'plan_pin_id' | 'tag'>>) {
+    await updateAsset(id, patch as Partial<MediaAsset>);
+    const refreshed = await getByIdInternal(id);
+    if (!refreshed) {
+      throw new Error('Media asset introuvable apres mise a jour.');
+    }
+    return refreshed;
+  },
+
+  async linkToTask(mediaId: string, taskId: string) {
+    await this.updateMeta(mediaId, { task_id: taskId });
+  },
+
+  async unlinkFromTask(mediaId: string) {
+    await this.updateMeta(mediaId, { task_id: undefined });
+  },
+
+  // Note: pin <-> media linking is source-of-truth in `plan_pin_links` (plans-annotations).
+  // This local field is kept as a mirror for fast filters / UI indicators.
+  async linkToPin(mediaId: string, pinId: string) {
+    await this.updateMeta(mediaId, { plan_pin_id: pinId });
+  },
+
+  async unlinkFromPin(mediaId: string) {
+    await this.updateMeta(mediaId, { plan_pin_id: undefined });
+  },
+
+  async retryUpload(mediaId: string) {
+    const asset = await getByIdInternal(mediaId);
+    if (!asset) {
+      throw new Error('Media introuvable.');
+    }
+
+    // Ensure the asset is processed + in PENDING state. This is safe offline-first.
+    if (!asset.watermark_applied) {
+      await this.process(asset.id);
+    }
+
+    await this.enqueueUpload(asset.id);
+
+    // Allow manual retries even after many automatic attempts.
+    await updateAsset(asset.id, {
+      retry_count: 0,
+      last_error: undefined
+    });
+
+    const refreshed = await getByIdInternal(asset.id);
+    if (!refreshed) {
+      throw new Error('Media introuvable apres retry.');
+    }
+    return refreshed;
+  },
+
   async listByProject(projectId: string, filters: MediaListFilters = {}) {
     await ensureSetup();
     const db = await getDb();
@@ -737,6 +837,35 @@ export const media = {
     );
 
     return rows.map(mapRow);
+  },
+
+  async countByProject(projectId: string, filters: MediaListFilters = {}) {
+    await ensureSetup();
+    const db = await getDb();
+
+    const where: string[] = ['project_id = ?'];
+    const params: Array<string> = [projectId];
+
+    if (filters.upload_status) {
+      where.push('upload_status = ?');
+      params.push(filters.upload_status);
+    }
+
+    if (filters.tag) {
+      where.push('tag = ?');
+      params.push(filters.tag);
+    }
+
+    const row = await db.getFirstAsync<{ count: number }>(
+      `
+        SELECT COUNT(*) AS count
+        FROM ${TABLE_NAME}
+        WHERE ${where.join(' AND ')}
+      `,
+      ...params
+    );
+
+    return row?.count ?? 0;
   },
 
   async listByTask(taskId: string) {
@@ -824,6 +953,20 @@ export const media = {
            OR (upload_status = 'FAILED' AND retry_count < ?)
       `,
       securityPolicies.maxSyncAttempts
+    );
+
+    return row?.count ?? 0;
+  },
+
+  async countFailedUploads() {
+    await ensureSetup();
+    const db = await getDb();
+    const row = await db.getFirstAsync<{ count: number }>(
+      `
+        SELECT COUNT(*) AS count
+        FROM ${TABLE_NAME}
+        WHERE upload_status = 'FAILED'
+      `
     );
 
     return row?.count ?? 0;

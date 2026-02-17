@@ -15,6 +15,13 @@ import { mapMemberRoleToAppRole, resolveMembership, toErrorMessage } from '../id
 import { appEnv } from '../env';
 import { getSupabaseClient } from '../supabase/client';
 import { flags } from '../../data/feature-flags';
+import { quotas } from '../../data/quotas-limits';
+import { share } from '../../data/external-sharing';
+import { audit } from '../../data/audit-compliance';
+import { governance } from '../../data/data-governance';
+import { rules } from '../../data/rules-engine';
+import { geo } from '../../data/geo-context';
+import { projects } from '../../data/projects';
 
 type AuthContextValue = {
   isConfigured: boolean;
@@ -62,6 +69,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const resetSecurityState = useCallback(() => {
     rbac.clearCache();
     flags.setContext({ org_id: undefined, user_id: undefined });
+    quotas.setContext({ org_id: undefined, user_id: undefined });
+    share.setContext({ org_id: undefined, user_id: undefined });
+    audit.setContext({ org_id: undefined, user_id: undefined });
+    governance.setContext({ org_id: undefined, user_id: undefined });
+    rules.setContext({ org_id: undefined, user_id: undefined });
+    geo.setContext({ org_id: undefined, user_id: undefined });
+    projects.setContext({ org_id: undefined });
     setRole(null);
     setPermissions([]);
     setProfile(null);
@@ -133,6 +147,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           user_id: nextSession.user.id
         });
 
+        quotas.setContext({
+          org_id: membership.orgId ?? undefined,
+          user_id: nextSession.user.id
+        });
+
+        share.setContext({
+          org_id: membership.orgId ?? undefined,
+          user_id: nextSession.user.id
+        });
+
+        audit.setContext({
+          org_id: membership.orgId ?? undefined,
+          user_id: nextSession.user.id
+        });
+
+        governance.setContext({
+          org_id: membership.orgId ?? undefined,
+          user_id: nextSession.user.id
+        });
+
+        rules.setContext({
+          org_id: membership.orgId ?? undefined,
+          user_id: nextSession.user.id
+        });
+
+        geo.setContext({
+          org_id: membership.orgId ?? undefined,
+          user_id: nextSession.user.id
+        });
+
+        projects.setContext({
+          org_id: membership.orgId ?? undefined
+        });
+
         if (membership.orgId) {
           try {
             await flags.listAll(membership.orgId);
@@ -185,6 +233,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setMemberRole(membership.memberRole);
 
     flags.setContext({
+      org_id: membership.orgId ?? undefined,
+      user_id: session.user.id
+    });
+
+    quotas.setContext({
+      org_id: membership.orgId ?? undefined,
+      user_id: session.user.id
+    });
+
+    share.setContext({
+      org_id: membership.orgId ?? undefined,
+      user_id: session.user.id
+    });
+
+    audit.setContext({
+      org_id: membership.orgId ?? undefined,
+      user_id: session.user.id
+    });
+
+    governance.setContext({
+      org_id: membership.orgId ?? undefined,
+      user_id: session.user.id
+    });
+
+    rules.setContext({
+      org_id: membership.orgId ?? undefined,
+      user_id: session.user.id
+    });
+
+    geo.setContext({
       org_id: membership.orgId ?? undefined,
       user_id: session.user.id
     });

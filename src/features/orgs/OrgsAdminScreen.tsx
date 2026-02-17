@@ -1,3 +1,4 @@
+import { useRoute } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useAuth } from '../../core/auth';
@@ -12,6 +13,7 @@ import {
   org,
   teams
 } from '../../data/orgs-admin';
+import { OrgQuotas, OrgUsage, quotas } from '../../data/quotas-limits';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
 import { Text } from '../../ui/components/Text';
@@ -38,14 +40,29 @@ function getErrorMessage(error: unknown) {
 }
 
 export function OrgsAdminScreen() {
+  const route = useRoute();
   const { colors, spacing, radii } = useTheme();
   const { role } = useAuth();
+
+  if (__DEV__ && route.name === 'TeamHome') {
+    // This screen is part of the Enterprise stack (OrgAdmin). If it shows up under TeamHome,
+    // the drawer route wiring is wrong and "Équipe" will render enterprise UI.
+    throw new Error('[nav] OrgsAdminScreen ne doit jamais être monté sur TeamHome. Vérifie TeamStackScreen.');
+  }
 
   const [organization, setOrganization] = useState<OrganizationRecord | null>(null);
   const [memberRows, setMemberRows] = useState<OrganizationMember[]>([]);
   const [teamRows, setTeamRows] = useState<TeamRecord[]>([]);
   const [moduleRows, setModuleRows] = useState<ModuleFlag[]>([]);
   const [modulePayloadDrafts, setModulePayloadDrafts] = useState<Record<string, string>>({});
+
+  const [quotaRow, setQuotaRow] = useState<OrgQuotas | null>(null);
+  const [usageRow, setUsageRow] = useState<OrgUsage | null>(null);
+
+  const [storageMbDraft, setStorageMbDraft] = useState('');
+  const [exportsPerDayDraft, setExportsPerDayDraft] = useState('');
+  const [mediaPerDayDraft, setMediaPerDayDraft] = useState('');
+  const [maxFileMbDraft, setMaxFileMbDraft] = useState('');
 
   const [orgNameDraft, setOrgNameDraft] = useState('');
   const [siretDraft, setSiretDraft] = useState('');
@@ -81,6 +98,20 @@ export function OrgsAdminScreen() {
     setPdfTemplateDraft(typeof maybeTemplate === 'string' ? maybeTemplate : '');
   }, []);
 
+  const hydrateQuotasDraft = useCallback((value: OrgQuotas) => {
+    setStorageMbDraft(String(value.storage_mb));
+    setExportsPerDayDraft(String(value.exports_per_day));
+    setMediaPerDayDraft(String(value.media_per_day));
+    setMaxFileMbDraft(String(value.max_file_mb));
+  }, []);
+
+  const refreshQuotas = useCallback(async () => {
+    const [nextQuotas, nextUsage] = await Promise.all([quotas.get(), quotas.getUsage()]);
+    setQuotaRow(nextQuotas);
+    setUsageRow(nextUsage);
+    hydrateQuotasDraft(nextQuotas);
+  }, [hydrateQuotasDraft]);
+
   const refreshOrganization = useCallback(async () => {
     const data = await org.getCurrent();
     setOrganization(data);
@@ -110,8 +141,8 @@ export function OrgsAdminScreen() {
   }, []);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([refreshOrganization(), refreshMembers(), refreshTeams(), refreshModules()]);
-  }, [refreshMembers, refreshModules, refreshOrganization, refreshTeams]);
+    await Promise.all([refreshOrganization(), refreshMembers(), refreshTeams(), refreshModules(), refreshQuotas()]);
+  }, [refreshMembers, refreshModules, refreshOrganization, refreshTeams, refreshQuotas]);
 
   useEffect(() => {
     let cancelled = false;
@@ -278,6 +309,69 @@ export function OrgsAdminScreen() {
     });
   };
 
+  const refreshQuotasRemote = async () => {
+    await withBusy(async () => {
+      const result = await quotas.refresh();
+      if (!result) {
+        setInfo("Quotas indisponibles (pas d'organisation active).");
+        return;
+      }
+
+      setQuotaRow(result.quotas);
+      setUsageRow(result.usage);
+      hydrateQuotasDraft(result.quotas);
+      setInfo('Quotas rafraichis.');
+    });
+  };
+
+  const saveQuotasSettings = async () => {
+    if (!isAdmin) {
+      return;
+    }
+
+    await withBusy(async () => {
+      const patch: Partial<Omit<OrgQuotas, 'org_id' | 'updated_at'>> = {};
+
+      const storageMb = Number.parseInt(storageMbDraft, 10);
+      const exportsPerDay = Number.parseInt(exportsPerDayDraft, 10);
+      const mediaPerDay = Number.parseInt(mediaPerDayDraft, 10);
+      const maxFileMb = Number.parseInt(maxFileMbDraft, 10);
+
+      if (Number.isFinite(storageMb)) patch.storage_mb = storageMb;
+      if (Number.isFinite(exportsPerDay)) patch.exports_per_day = exportsPerDay;
+      if (Number.isFinite(mediaPerDay)) patch.media_per_day = mediaPerDay;
+      if (Number.isFinite(maxFileMb)) patch.max_file_mb = maxFileMb;
+
+      if (Object.keys(patch).length === 0) {
+        throw new Error('Aucune valeur quota valide à enregistrer.');
+      }
+
+      const next = await quotas.update(patch);
+      setQuotaRow(next);
+      hydrateQuotasDraft(next);
+
+      const nextUsage = await quotas.getUsage();
+      setUsageRow(nextUsage);
+
+      setInfo('Quotas enregistrés.');
+    });
+  };
+
+  const purgeOldExports = async () => {
+    await withBusy(async () => {
+      const removed = await quotas.purgeOldExports(7);
+      setInfo(`${removed} export(s) purgé(s) (>= 7 jours).`);
+    });
+  };
+
+  const cleanupLocalCache = async () => {
+    await withBusy(async () => {
+      await quotas.cleanupCache();
+      setInfo('Cache media nettoyé.');
+    });
+  };
+
+
   return (
     <Screen>
       <ScrollView
@@ -337,6 +431,81 @@ export function OrgsAdminScreen() {
                 label={busy ? 'Enregistrement...' : 'Enregistrer paramètres'}
                 onPress={() => void saveOrgSettings()}
                 disabled={!isAdmin || busy || !organization}
+              />
+            </View>
+          </Card>
+          <Card>
+            <Text variant="h2">Quotas & limites</Text>
+            <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Stockage serveur + limites journalières (cache offline). Dépassement : blocage upload/export.
+            </Text>
+
+            <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
+              <Text variant="body">
+                Stockage: {usageRow ? Math.ceil(usageRow.storage_used_mb) : 0} / {quotaRow ? quotaRow.storage_mb : 0} MB
+              </Text>
+              <Text variant="body">
+                Exports aujourd'hui: {usageRow ? usageRow.exports_today : 0} / {quotaRow ? quotaRow.exports_per_day : 0}
+              </Text>
+              <Text variant="body">
+                Médias aujourd'hui: {usageRow ? usageRow.media_today : 0} / {quotaRow ? quotaRow.media_per_day : 0}
+              </Text>
+              <Text variant="body">Taille fichier max: {quotaRow ? quotaRow.max_file_mb : 0} MB</Text>
+              <Text variant="caption" style={{ color: colors.slate }}>
+                Dernier calcul: {usageRow?.computed_at ?? quotaRow?.updated_at ?? 'n/a'}
+              </Text>
+            </View>
+
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
+              <Button label="Rafraichir" kind="ghost" onPress={() => void refreshQuotasRemote()} disabled={busy} />
+              <Button label="Purger exports (7j)" kind="ghost" onPress={() => void purgeOldExports()} disabled={busy} />
+              <Button label="Nettoyer cache" kind="ghost" onPress={() => void cleanupLocalCache()} disabled={busy} />
+            </View>
+
+            <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
+              <TextInput
+                value={storageMbDraft}
+                onChangeText={setStorageMbDraft}
+                placeholder="Stockage max (MB)"
+                placeholderTextColor={colors.slate}
+                style={inputStyle}
+                editable={isAdmin}
+                keyboardType="number-pad"
+              />
+              <TextInput
+                value={exportsPerDayDraft}
+                onChangeText={setExportsPerDayDraft}
+                placeholder="Exports / jour"
+                placeholderTextColor={colors.slate}
+                style={inputStyle}
+                editable={isAdmin}
+                keyboardType="number-pad"
+              />
+              <TextInput
+                value={mediaPerDayDraft}
+                onChangeText={setMediaPerDayDraft}
+                placeholder="Médias / jour"
+                placeholderTextColor={colors.slate}
+                style={inputStyle}
+                editable={isAdmin}
+                keyboardType="number-pad"
+              />
+              <TextInput
+                value={maxFileMbDraft}
+                onChangeText={setMaxFileMbDraft}
+                placeholder="Taille fichier max (MB)"
+                placeholderTextColor={colors.slate}
+                style={inputStyle}
+                editable={isAdmin}
+                keyboardType="number-pad"
+              />
+            </View>
+
+            <View style={{ marginTop: spacing.md }}>
+              <Button
+                label="Enregistrer quotas"
+                onPress={() => void saveQuotasSettings()}
+                disabled={!isAdmin || busy}
               />
             </View>
           </Card>
@@ -619,3 +788,6 @@ export function OrgsAdminScreen() {
     </Screen>
   );
 }
+
+// Dev guardrail: used by navigation wiring assertions.
+(OrgsAdminScreen as any).screenKey = 'ENTERPRISE_ORGS_ADMIN';

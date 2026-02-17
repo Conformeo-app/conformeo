@@ -2,8 +2,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, TextInput, View } from 'react-native';
 import { useAuth } from '../../core/auth';
 import { appEnv } from '../../core/env';
-import { SessionAuditEntry } from '../../core/identity-security';
+import { DeviceEntry, SessionAuditEntry, devices } from '../../core/identity-security';
+import { BuildIntegrity, security } from '../../core/security/hardening';
 import { securityPolicies } from '../../core/security/policies';
+import { geo } from '../../data/geo-context';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
 import { Text } from '../../ui/components/Text';
@@ -39,6 +41,10 @@ export function SecurityScreen() {
 
   const [mfaCode, setMfaCode] = useState('');
   const [sessionRows, setSessionRows] = useState<SessionAuditEntry[]>([]);
+  const [deviceRows, setDeviceRows] = useState<DeviceEntry[]>([]);
+  const [deviceLabels, setDeviceLabels] = useState<Record<string, string>>({});
+  const [integrity, setIntegrity] = useState<BuildIntegrity | null>(null);
+  const [locationStatus, setLocationStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -62,9 +68,40 @@ export function SecurityScreen() {
     }
   }, [listSessions]);
 
+  const loadDevices = useCallback(async () => {
+    try {
+      const rows = await devices.list();
+      setDeviceRows(rows);
+      setDeviceLabels(Object.fromEntries(rows.map((row) => [row.device_id, row.device_label ?? ""])));
+    } catch (loadError) {
+      setError(getErrorMessage(loadError));
+    }
+  }, []);
+
+  const loadIntegrity = useCallback(async () => {
+    try {
+      const report = await security.getBuildIntegrity();
+      setIntegrity(report);
+    } catch (integrityError) {
+      setError(getErrorMessage(integrityError));
+    }
+  }, []);
+
+  const loadLocation = useCallback(async () => {
+    try {
+      const status = await geo.getPermissionStatus();
+      setLocationStatus(status);
+    } catch {
+      setLocationStatus('unavailable');
+    }
+  }, []);
+
   useEffect(() => {
     void loadSessions();
-  }, [loadSessions]);
+    void loadDevices();
+    void loadIntegrity();
+    void loadLocation();
+  }, [loadDevices, loadIntegrity, loadLocation, loadSessions]);
 
   const withBusy = async (work: () => Promise<void>) => {
     setBusy(true);
@@ -131,6 +168,27 @@ export function SecurityScreen() {
                 label="Rafraichir role/permissions"
                 kind="ghost"
                 onPress={() => void withBusy(refreshAuthorization)}
+                disabled={busy}
+              />
+            </View>
+          </Card>
+
+          <Card>
+            <Text variant="h2">Localisation (GPS)</Text>
+            <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Statut permission: {locationStatus ?? '...'}
+            </Text>
+            <View style={{ marginTop: spacing.md }}>
+              <Button
+                label={busy ? 'Demande...' : 'Demander permission'}
+                kind="ghost"
+                onPress={() =>
+                  void withBusy(async () => {
+                    const status = await geo.requestPermission();
+                    setLocationStatus(status);
+                    setInfo(`Permission localisation: ${status}`);
+                  })
+                }
                 disabled={busy}
               />
             </View>
@@ -204,6 +262,88 @@ export function SecurityScreen() {
           ) : null}
 
           <Card>
+            <Text variant="h2">Mes appareils</Text>
+            <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Gestion multi-device: liste, renommage, revocation (logout force).
+            </Text>
+
+            <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.md }}>
+              <Button
+                label="Rafraichir appareils"
+                kind="ghost"
+                onPress={() => void withBusy(loadDevices)}
+                disabled={busy}
+              />
+            </View>
+
+            <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
+              {deviceRows.length === 0 ? (
+                <Text variant="caption" style={{ color: colors.slate }}>
+                  Aucun appareil enregistre.
+                </Text>
+              ) : (
+                deviceRows.map((row) => (
+                  <Card key={row.device_id}>
+                    <Text variant="caption" style={{ color: colors.slate }}>
+                      appareil: {row.device_label ?? row.device_id}{row.is_current ? " (cet appareil)" : ""}
+                    </Text>
+                    <Text variant="caption" style={{ color: colors.slate }}>
+                      sessions: {row.session_count}
+                    </Text>
+                    <Text variant="caption" style={{ color: colors.slate }}>
+                      last_seen: {new Date(row.last_seen_at).toLocaleString("fr-FR")}
+                    </Text>
+                    <Text variant="caption" style={{ color: colors.slate }}>
+                      revoked: {row.revoked_at ? new Date(row.revoked_at).toLocaleString("fr-FR") : "non"}
+                    </Text>
+
+                    <TextInput
+                      value={deviceLabels[row.device_id] ?? ""}
+                      onChangeText={(value) => setDeviceLabels((prev) => ({ ...prev, [row.device_id]: value }))}
+                      placeholder="Nom appareil"
+                      placeholderTextColor={colors.slate}
+                      style={[inputStyle, { marginTop: spacing.sm }]}
+                    />
+
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.sm }}>
+                      <Button
+                        label="Renommer"
+                        kind="ghost"
+                        onPress={() =>
+                          void withBusy(async () => {
+                            await devices.updateLabel(row.device_id, deviceLabels[row.device_id] ?? "");
+                            await loadDevices();
+                            await loadSessions();
+                          })
+                        }
+                        disabled={busy}
+                      />
+                      {!row.revoked_at ? (
+                        <Button
+                          label="Revoquer appareil"
+                          kind="ghost"
+                          onPress={() =>
+                            void withBusy(async () => {
+                              await devices.revoke(row.device_id);
+                              await loadDevices();
+                              await loadSessions();
+                              const currentDeviceId = await devices.getCurrentDeviceId();
+                              if (currentDeviceId === row.device_id) {
+                                await signOut();
+                              }
+                            })
+                          }
+                          disabled={busy}
+                        />
+                      ) : null}
+                    </View>
+                  </Card>
+                ))
+              )}
+            </View>
+          </Card>
+
+          <Card>
             <Text variant="h2">Sessions</Text>
             <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
               Révocation locale via sessions_audit.
@@ -258,6 +398,57 @@ export function SecurityScreen() {
                   </Card>
                 ))
               )}
+            </View>
+          </Card>
+
+          <Card>
+            <Text variant="h2">Hardening runtime</Text>
+            <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Mode strict: {integrity?.strictMode ? 'actif' : 'inactif'} • sécurisé: {integrity?.secure ? 'oui' : 'non'}
+            </Text>
+            <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Hermes: {integrity?.hermesEnabled ? 'oui' : 'non'} • Expo Go: {integrity?.isExpoGo ? 'oui' : 'non'}
+            </Text>
+            <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Debugger: {integrity?.debuggerAttached ? 'oui' : 'non'} • Jailbreak/root (v1): {integrity?.jailbroken ? 'oui' : 'non'}
+            </Text>
+
+            <View style={{ gap: spacing.xs, marginTop: spacing.sm }}>
+              {integrity?.checks.map((check) => (
+                <Text
+                  key={check.key}
+                  variant="caption"
+                  style={{
+                    color:
+                      check.status === 'FAIL'
+                        ? colors.rose
+                        : check.status === 'WARN'
+                          ? colors.amber
+                          : colors.tealDark
+                  }}
+                >
+                  {check.status} · {check.key} · {check.message}
+                </Text>
+              ))}
+            </View>
+
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
+              <Button
+                label="Rafraichir hardening"
+                kind="ghost"
+                onPress={() => void withBusy(loadIntegrity)}
+                disabled={busy}
+              />
+              <Button
+                label="Assert secure env"
+                onPress={() =>
+                  void withBusy(async () => {
+                    await security.assertSecureEnvironment();
+                    setInfo('assertSecureEnvironment: OK');
+                  })
+                }
+                disabled={busy}
+              />
             </View>
           </Card>
 

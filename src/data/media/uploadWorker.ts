@@ -78,9 +78,7 @@ async function uploadSingle(asset: MediaAsset) {
     throw new Error(error.message);
   }
 
-  const { data } = client.storage.from(STORAGE_BUCKET).getPublicUrl(remotePath);
-
-  await media.markUploaded(asset.id, remotePath, data.publicUrl);
+  await media.markUploaded(asset.id, remotePath);
 }
 
 export const mediaUploadWorker = {

@@ -49,7 +49,10 @@ export type DashboardAlertCode =
   | 'SYNC_ERRORS'
   | 'SAFETY_TASKS'
   | 'UPLOAD_QUEUE_QUOTA'
-  | 'EXPORT_DAILY_QUOTA';
+  | 'EXPORT_DAILY_QUOTA'
+  | 'MEDIA_DAILY_QUOTA'
+  | 'STORAGE_QUOTA'
+  | 'CERTIFICATIONS_EXPIRING';
 
 export type DashboardAlert = {
   code: DashboardAlertCode;
@@ -120,6 +123,7 @@ export type DashboardSummary = {
   syncPendingOps: number;
   syncFailedOps: number;
   safetyOpenTasks: number;
+  expiringCertifications: number;
 
   alerts: DashboardAlert[];
 

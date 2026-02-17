@@ -4,6 +4,7 @@ import { documents } from '../documents';
 import { exportsDoe, ExportJob } from '../exports';
 import { media, MediaAsset } from '../media';
 import { offlineDB } from '../offline/outbox';
+import { plans } from '../plans-annotations';
 import { Task, tasks } from '../tasks';
 import {
   ChecklistTemplateConfig,
@@ -14,8 +15,10 @@ import {
   ControlModeState,
   ControlProofFilters,
   ControlSummary,
+  InspectionScore,
   InspectionChecklist,
   InspectionItem,
+  InspectionSummary,
   RiskLevel
 } from './types';
 
@@ -41,6 +44,7 @@ const CRITICAL_KEYWORDS = [
   'epi',
   'harnais',
   'risque',
+  'critical',
   'critique',
   'incendie'
 ];
@@ -149,6 +153,19 @@ function parseDateToMs(value: string | undefined) {
 
 function compareDescByIso(leftIso: string, rightIso: string) {
   return Date.parse(rightIso) - Date.parse(leftIso);
+}
+
+function coerceNumber(value: unknown) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  if (typeof value === 'string' && value.length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
 }
 
 function mapStateRow(row: ControlModeStateRow): ControlModeState {
@@ -400,8 +417,12 @@ function taskIsCritical(task: Task) {
   return task.tags.some((tag) => hasCriticalKeyword(tag));
 }
 
-function mediaIsCritical(asset: MediaAsset, taskById: Map<string, Task>) {
+function mediaIsCritical(asset: MediaAsset, taskById: Map<string, Task>, openPinIds: Set<string>) {
   if (hasCriticalKeyword(asset.tag)) {
+    return true;
+  }
+
+  if (asset.plan_pin_id && openPinIds.has(asset.plan_pin_id)) {
     return true;
   }
 
@@ -430,21 +451,6 @@ function computeRiskLevel(taskList: Task[], openTasks: number, blockedTasks: num
   }
 
   return 'OK';
-}
-
-function resolveLastActivityAt(taskList: Task[], mediaList: MediaAsset[], documentList: Array<{ updated_at: string }>) {
-  const dates = [
-    ...taskList.map((task) => task.updated_at),
-    ...mediaList.map((asset) => asset.created_at),
-    ...documentList.map((document) => document.updated_at)
-  ];
-
-  if (dates.length === 0) {
-    return undefined;
-  }
-
-  const sorted = [...dates].sort(compareDescByIso);
-  return sorted[0];
 }
 
 function buildRecentActivity(
@@ -590,6 +596,65 @@ async function listChecklistItems(checklistId: string) {
   );
 
   return rows.map(mapItemRow);
+}
+
+async function listChecklistRows(projectId: string, orgId: string, limit: number, offset: number) {
+  await ensureSetup();
+  const db = await getDb();
+
+  return db.getAllAsync<ChecklistRow>(
+    `
+      SELECT *
+      FROM ${CHECKLISTS_TABLE}
+      WHERE org_id = ?
+        AND project_id = ?
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?
+    `,
+    orgId,
+    projectId,
+    limit,
+    offset
+  );
+}
+
+async function computeChecklistScores(checklistIds: string[]) {
+  if (checklistIds.length === 0) {
+    return new Map<string, InspectionScore>();
+  }
+
+  await ensureSetup();
+  const db = await getDb();
+
+  const placeholders = checklistIds.map(() => '?').join(', ');
+
+  const rows = await db.getAllAsync<{
+    checklist_id: string;
+    checked_count: number | string | null;
+    total_count: number | string | null;
+  }>(
+    `
+      SELECT
+        checklist_id,
+        SUM(checked) AS checked_count,
+        COUNT(*) AS total_count
+      FROM ${ITEMS_TABLE}
+      WHERE checklist_id IN (${placeholders})
+      GROUP BY checklist_id
+    `,
+    ...checklistIds
+  );
+
+  const map = new Map<string, InspectionScore>();
+
+  for (const row of rows) {
+    map.set(row.checklist_id, {
+      score_checked: coerceNumber(row.checked_count),
+      score_total: coerceNumber(row.total_count)
+    });
+  }
+
+  return map;
 }
 
 async function getItemWithChecklist(itemId: string) {
@@ -763,13 +828,19 @@ export const controlMode: ControlModeApi = {
 
     const openTasks = taskList.filter((task) => task.status === 'TODO' || task.status === 'DOING').length;
     const blockedTasks = taskList.filter((task) => task.status === 'BLOCKED').length;
+    const openSafetyTasks = taskList.filter((task) => task.status !== 'DONE' && taskIsCritical(task)).length;
+
+    const pendingUploads = mediaList.filter(
+      (asset) => asset.upload_status === 'PENDING' || asset.upload_status === 'UPLOADING'
+    ).length;
+    const failedUploads = mediaList.filter((asset) => asset.upload_status === 'FAILED').length;
 
     return {
-      openTasks,
       blockedTasks,
-      mediaCount: mediaList.length,
-      documentsCount: documentList.length,
-      lastActivityAt: resolveLastActivityAt(taskList, mediaList, documentList),
+      openSafetyTasks,
+      failedUploads,
+      pendingUploads,
+      docsCount: documentList.length,
       riskLevel: computeRiskLevel(taskList, openTasks, blockedTasks)
     };
   },
@@ -784,6 +855,18 @@ export const controlMode: ControlModeApi = {
     ]);
 
     const taskById = new Map(taskList.map((task) => [task.id, task]));
+    const openPinIds = new Set<string>();
+
+    try {
+      plans.setOrg(orgId);
+      const pins = await plans.listPinsByProject(safeProjectId, { status: 'OPEN', limit: 1000, offset: 0 });
+      for (const pin of pins) {
+        openPinIds.add(pin.id);
+      }
+    } catch {
+      // ignore: plans module/table not available
+    }
+
     const safeTag = normalizeText(filters.tag).toLowerCase();
     const safeTaskId = normalizeText(filters.task_id);
     const fromMs = parseDateToMs(filters.from_date);
@@ -819,7 +902,7 @@ export const controlMode: ControlModeApi = {
         return true;
       }
 
-      return mediaIsCritical(asset, taskById);
+      return mediaIsCritical(asset, taskById, openPinIds);
     });
 
     const sorted = filtered.sort((left, right) => compareDescByIso(left.created_at, right.created_at));
@@ -942,6 +1025,42 @@ export const controlMode: ControlModeApi = {
     };
   },
 
+  async listInspections(projectId: string, options: { limit?: number; offset?: number } = {}) {
+    const orgId = requireOrgId();
+    const safeProjectId = ensureProjectId(projectId);
+
+    const limit = Math.max(1, Math.min(options.limit ?? 20, 100));
+    const offset = Math.max(0, Math.floor(options.offset ?? 0));
+
+    const rows = await listChecklistRows(safeProjectId, orgId, limit, offset);
+    if (rows.length === 0) {
+      return [] as InspectionSummary[];
+    }
+
+    const ids = rows.map((row) => row.id);
+    const scores = await computeChecklistScores(ids);
+
+    return rows.map((row) => {
+      const checklist = mapChecklistRow(row);
+      const score = scores.get(checklist.id) ?? { score_checked: 0, score_total: 0 };
+      return {
+        ...checklist,
+        score_checked: score.score_checked,
+        score_total: score.score_total
+      };
+    });
+  },
+
+  async computeScore(checklistId: string) {
+    const safeId = normalizeText(checklistId);
+    if (safeId.length === 0) {
+      throw new Error('checklistId est requis.');
+    }
+
+    const scores = await computeChecklistScores([safeId]);
+    return scores.get(safeId) ?? { score_checked: 0, score_total: 0 };
+  },
+
   async toggleItem(itemId: string, checked: boolean) {
     const context = requireContext();
     const safeItemId = normalizeText(itemId);
@@ -1059,5 +1178,13 @@ export const controlMode: ControlModeApi = {
     void exportsDoe.run(job.id);
 
     return job;
+  },
+
+  async createInspection(projectId: string) {
+    return this.createChecklist(projectId);
+  },
+
+  async getLatestInspection(projectId: string) {
+    return this.getLatestChecklist(projectId);
   }
 };

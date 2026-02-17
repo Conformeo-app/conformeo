@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "task.permis_feu",
+      "name": "permis_feu",
+      "entity": "TASK",
+      "enabled": true,
+      "priority": 100,
+      "condition": {
+        "kind": "KEYWORDS_ANY",
+        "fields": ["title", "description", "tags"],
+        "keywords": ["permis feu", "meulage", "soudure", "chalumeau"]
+      },
+      "actions": [
+        { "kind": "ADD_TAG", "value": "permis_feu" },
+        { "kind": "SUGGEST", "value": "Créer un permis de feu pour cette intervention" },
+        { "kind": "ADD_REMINDER", "value": "Vérifier extincteur et balisage avant démarrage" }
+      ]
+    },
+    {
+      "id": "task.epi",
+      "name": "epi",
+      "entity": "TASK",
+      "enabled": true,
+      "priority": 90,
+      "condition": {
+        "kind": "KEYWORDS_ANY",
+        "fields": ["title", "description", "tags"],
+        "keywords": ["epi", "casque", "harnais", "gants", "lunettes"]
+      },
+      "actions": [
+        { "kind": "ADD_TAG", "value": "safety" },
+        { "kind": "SUGGEST", "value": "Contrôler le port des EPI obligatoires" }
+      ]
+    },
+    {
+      "id": "task.dechets",
+      "name": "dechets",
+      "entity": "TASK",
+      "enabled": true,
+      "priority": 80,
+      "condition": {
+        "kind": "KEYWORDS_ANY",
+        "fields": ["title", "description", "tags"],
+        "keywords": ["dechet", "dechets", "benne", "gravats"]
+      },
+      "actions": [
+        { "kind": "ADD_TAG", "value": "waste_related" },
+        { "kind": "SUGGEST", "value": "Tracer la filière de déchets dans le rapport chantier" }
+      ]
+    }
+  ]
+}
+
