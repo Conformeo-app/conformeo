@@ -18,7 +18,7 @@ export function UIGallerySurfacesScreen() {
 
   return (
     <Screen>
-      <SectionHeader title="UI Gallery — Surfaces" subtitle="Card, KPI, ListRow, FAB…" />
+      <SectionHeader title="Galerie UI — Surfaces" subtitle="Cartes, KPI, lignes, bouton flottant…" />
 
       <ScrollView
         style={{ flex: 1 }}
@@ -26,7 +26,7 @@ export function UIGallerySurfacesScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Card>
-          <Text variant="h2">Card</Text>
+          <Text variant="h2">Carte</Text>
           <Text variant="body" style={{ color: colors.mutedText, marginTop: spacing.xs }}>
             Une seule ombre standard (`shadows.sm`) + bordure tokenisée.
           </Text>
@@ -42,10 +42,10 @@ export function UIGallerySurfacesScreen() {
         </Card>
 
         <Card>
-          <Text variant="h2">ListRow</Text>
+          <Text variant="h2">Ligne</Text>
           <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
             <ListRow title="Documents" subtitle="Plans, DOE, PV…" leftIcon="file-document-outline" onPress={() => {}} />
-            <ListRow title="Preuves" subtitle="Uploads en attente / échec…" leftIcon="camera" onPress={() => {}} />
+            <ListRow title="Preuves" subtitle="Téléversements en attente / échec…" leftIcon="camera" onPress={() => {}} />
             <ListRow title="Conflits" subtitle="Résolution requise" leftIcon="alert-circle-outline" onPress={() => {}} />
             <Divider />
             <Text variant="caption" style={{ color: colors.mutedText }}>
@@ -57,9 +57,9 @@ export function UIGallerySurfacesScreen() {
         <Card>
           <Text variant="h2">Actions</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
-            <Button label="Primary" onPress={() => {}} />
-            <Button label="Secondary" variant="secondary" onPress={() => {}} />
-            <Button label="Ghost" variant="ghost" onPress={() => {}} />
+            <Button label="Principal" onPress={() => {}} />
+            <Button label="Secondaire" variant="secondary" onPress={() => {}} />
+            <Button label="Transparent" variant="ghost" onPress={() => {}} />
             <Button label="Danger" variant="danger" onPress={() => {}} />
           </View>
           <View style={{ marginTop: spacing.md }}>

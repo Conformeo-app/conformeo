@@ -32,10 +32,10 @@ const QUICK_FILTERS: Array<{ key: QuickFilter; label: string }> = [
   { key: 'ALL', label: 'Toutes' },
   { key: 'TODAY', label: "Aujourd'hui" },
   { key: 'WEEK', label: 'Cette semaine' },
-  { key: 'TASK_LINKED', label: 'Liees a une tache' },
-  { key: 'UNLINKED', label: 'Non liees' },
-  { key: 'UPLOAD_PENDING', label: 'Upload en attente' },
-  { key: 'UPLOAD_FAILED', label: 'Upload en echec' }
+  { key: 'TASK_LINKED', label: 'Liées à une tâche' },
+  { key: 'UNLINKED', label: 'Non liées' },
+  { key: 'UPLOAD_PENDING', label: 'Téléversement en attente' },
+  { key: 'UPLOAD_FAILED', label: 'Téléversement en échec' }
 ];
 
 type DetailState = {
@@ -86,10 +86,10 @@ function statusTint(status: UploadStatus, palette: { teal: string; mint: string;
 }
 
 function statusLabel(status: UploadStatus) {
-  if (status === 'UPLOADED') return 'UPLOADED';
-  if (status === 'UPLOADING') return 'UPLOADING';
-  if (status === 'FAILED') return 'FAILED';
-  return 'PENDING';
+  if (status === 'UPLOADED') return 'Envoyé';
+  if (status === 'UPLOADING') return 'En cours';
+  if (status === 'FAILED') return 'Échec';
+  return 'En attente';
 }
 
 function tileIcons(asset: MediaAsset) {
@@ -354,9 +354,9 @@ function MediaDetailPanel({
     return (
       <Card style={{ flex: 1, minHeight: 0 }}>
         <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-          <Text variant="h2">Detail preuve</Text>
+          <Text variant="h2">Détail preuve</Text>
           <Text variant="body" style={{ color: colors.slate, marginTop: spacing.sm }}>
-            Selectionnez une preuve dans la grille.
+            Sélectionnez une preuve dans la grille.
           </Text>
         </ScrollView>
       </Card>
@@ -452,10 +452,10 @@ function MediaDetailPanel({
         </View>
 
         <Text variant="h2" style={{ marginTop: spacing.lg }}>
-          Upload
+          Téléversement
         </Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
-          <Button label="Retenter upload" onPress={onRetryUpload} disabled={busy} />
+          <Button label="Retenter le téléversement" onPress={onRetryUpload} disabled={busy} />
           <Button label="Ouvrir fichier" kind="ghost" onPress={onOpenFile} disabled={busy} />
         </View>
       </ScrollView>
@@ -895,11 +895,11 @@ export function MediaScreen({
     <View style={{ gap: spacing.md }}>
       <SectionHeader
         title="Preuves"
-        subtitle="Grille thumbnail-first, capture/import offline, upload en arriere-plan, filtres rapides."
+        subtitle="Grille thumbnail-first, capture/import offline, upload en arrière-plan, filtres rapides."
       />
 
       <Card>
-        <Text variant="h2">Etat</Text>
+        <Text variant="h2">État</Text>
         <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
           Total: {stats.total}
         </Text>
@@ -907,7 +907,7 @@ export function MediaScreen({
           En attente: {stats.pending} · En echec: {stats.failed}
         </Text>
         <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
-          Queue sync globale: {syncStatus.queueDepth} · dead letters: {syncStatus.deadLetterCount}
+          File sync globale: {syncStatus.queueDepth} · échecs définitifs: {syncStatus.deadLetterCount}
         </Text>
         {error ? (
           <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
@@ -919,7 +919,7 @@ export function MediaScreen({
           <Button label="+ Photo" onPress={onCapture} disabled={busy} />
           {allowImport ? <Button label="Importer" kind="ghost" onPress={onImport} disabled={busy} /> : null}
           <Button label="Sync" kind="ghost" onPress={onSyncNow} disabled={busy} />
-          <Button label="Rafraichir" kind="ghost" onPress={() => void refresh()} disabled={busy} />
+          <Button label="Rafraîchir" kind="ghost" onPress={() => void refresh()} disabled={busy} />
         </View>
       </Card>
 
@@ -960,6 +960,8 @@ export function MediaScreen({
         numColumns={columns}
         style={{ flex: 1, minHeight: 0 }}
         keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
+        showsVerticalScrollIndicator
         contentContainerStyle={{
           padding: spacing.md,
           paddingBottom: spacing.lg
@@ -1032,7 +1034,13 @@ export function MediaScreen({
   return (
     <Screen>
       <View style={{ flex: 1, minHeight: 0, flexDirection: 'row', gap: spacing.md }}>
-        <ScrollView style={{ width: 360, minHeight: 0 }} contentContainerStyle={{ paddingBottom: spacing.lg }} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          style={{ width: 360, minHeight: 0 }}
+          contentContainerStyle={{ paddingBottom: spacing.lg }}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+          showsVerticalScrollIndicator
+        >
           {leftColumn}
         </ScrollView>
         <View style={{ flex: 1, minHeight: 0 }}>

@@ -1,5 +1,6 @@
 import { isRunningInExpoGo } from 'expo';
 import Constants from 'expo-constants';
+import { requireOptionalNativeModule } from 'expo-modules-core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type DictationField = 'title' | 'description' | 'comment';
@@ -47,8 +48,18 @@ function isInExpoGo() {
   return Constants.appOwnership === "expo";
 }
 
+function hasSpeechNativeModule() {
+  // expo-speech-recognition throws at module evaluation time if the native module is missing.
+  // Guard before importing to avoid hard crashes in Expo Go or builds without this module.
+  try {
+    return Boolean(requireOptionalNativeModule('ExpoSpeechRecognition'));
+  } catch {
+    return false;
+  }
+}
+
 async function loadSpeechModule() {
-  if (isInExpoGo()) {
+  if (isInExpoGo() || !hasSpeechNativeModule()) {
     return null;
   }
 

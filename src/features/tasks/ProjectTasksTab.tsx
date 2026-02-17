@@ -25,10 +25,10 @@ type SyncBadge = 'SYNCED' | 'PENDING' | 'ERROR';
 
 const STATUS_CHIPS: Array<{ key: TaskStatus | 'ALL'; label: string }> = [
   { key: 'ALL', label: 'Tous' },
-  { key: 'TODO', label: 'A faire' },
+  { key: 'TODO', label: 'À faire' },
   { key: 'DOING', label: 'En cours' },
-  { key: 'BLOCKED', label: 'Bloquees' },
-  { key: 'DONE', label: 'Terminees' }
+  { key: 'BLOCKED', label: 'Bloquées' },
+  { key: 'DONE', label: 'Terminées' }
 ];
 
 function statusColor(status: TaskStatus, palette: { teal: string; amber: string; rose: string; mint: string }) {
@@ -36,6 +36,13 @@ function statusColor(status: TaskStatus, palette: { teal: string; amber: string;
   if (status === 'DOING') return palette.teal;
   if (status === 'DONE') return palette.mint;
   return palette.rose;
+}
+
+function statusLabel(status: TaskStatus) {
+  if (status === 'TODO') return 'À faire';
+  if (status === 'DOING') return 'En cours';
+  if (status === 'DONE') return 'Terminée';
+  return 'Bloquée';
 }
 
 function normalizeText(value: string) {
@@ -491,7 +498,7 @@ export function ProjectTasksTab({ projectId }: { projectId?: string } = {}) {
       const initials = avatarInitials(item.assignee_user_id, user?.id);
 
       const badgeColor = badge === 'ERROR' ? colors.rose : badge === 'PENDING' ? colors.amber : colors.mint;
-      const badgeLabel = badge === 'ERROR' ? 'SYNC ERR' : badge === 'PENDING' ? 'SYNC' : 'OK';
+      const badgeLabel = badge === 'ERROR' ? 'ÉCHEC' : badge === 'PENDING' ? 'SYNC' : 'OK';
 
       return (
         <Pressable onPress={() => void selectTask(item)}>
@@ -524,7 +531,7 @@ export function ProjectTasksTab({ projectId }: { projectId?: string } = {}) {
                     backgroundColor: statusColor(item.status, colors)
                   }}
                 >
-                  <Text variant="caption">{item.status}</Text>
+                  <Text variant="caption">{statusLabel(item.status)}</Text>
                 </View>
               </View>
             </View>
@@ -537,7 +544,7 @@ export function ProjectTasksTab({ projectId }: { projectId?: string } = {}) {
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }}>
                 {safety ? (
                   <View style={{ paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: radii.pill, backgroundColor: colors.amber }}>
-                    <Text variant="caption">SAFETY</Text>
+                    <Text variant="caption">SÉCURITÉ</Text>
                   </View>
                 ) : null}
                 <View style={{ paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: radii.pill, backgroundColor: colors.fog }}>
@@ -571,7 +578,7 @@ export function ProjectTasksTab({ projectId }: { projectId?: string } = {}) {
     return (
       <View style={{ gap: spacing.md, marginBottom: spacing.sm }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', gap: spacing.sm }}>
-          <SectionHeader title="Taches" subtitle="Offline-first: creation rapide, filtres, preuves, suggestions." />
+          <SectionHeader title="Tâches" subtitle="Hors ligne d'abord : création rapide, filtres, preuves, suggestions." />
           <Button label="+" onPress={() => openCreate()} disabled={loading} />
         </View>
 
@@ -645,7 +652,7 @@ export function ProjectTasksTab({ projectId }: { projectId?: string } = {}) {
         </View>
 
         <Text variant="caption" style={{ color: colors.slate }}>
-          {items.length} element(s) charges • queue sync {syncStatus.queueDepth}
+          {items.length} élément(s) chargé(s) • file sync {syncStatus.queueDepth}
         </Text>
 
         {error ? (

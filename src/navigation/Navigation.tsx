@@ -285,7 +285,7 @@ function SecurityStackScreen() {
             <SecurityStack.Screen name="Search" component={SearchScreen} options={{ title: 'Recherche' }} />
           ) : null}
           {availableModules.includes('offline') ? (
-            <SecurityStack.Screen name="Offline" component={OfflineScreen} options={{ title: 'Offline / Sync' }} />
+            <SecurityStack.Screen name="Offline" component={OfflineScreen} options={{ title: 'Hors ligne / Synchronisation' }} />
           ) : null}
           {availableModules.includes('conflicts') ? (
             <SecurityStack.Screen name="Conflicts" component={ConflictsScreen} options={{ title: 'Conflits' }} />
@@ -294,13 +294,13 @@ function SecurityStackScreen() {
             <SecurityStack.Screen name="Audit" component={AuditScreen} options={{ title: 'Audit' }} />
           ) : null}
           {availableModules.includes('superadmin') ? (
-            <SecurityStack.Screen name="SuperAdmin" component={SuperAdminScreen} options={{ title: 'Super Admin' }} />
+            <SecurityStack.Screen name="SuperAdmin" component={SuperAdminScreen} options={{ title: 'Super-admin' }} />
           ) : null}
           {galleryEnabled ? (
             <>
-              <SecurityStack.Screen name="UIGallery" component={UIGalleryScreen} options={{ title: 'UI Gallery' }} />
-              <SecurityStack.Screen name="UIGalleryAtoms" component={UIGalleryAtomsScreen} options={{ title: 'Atoms' }} />
-              <SecurityStack.Screen name="UIGalleryInputs" component={UIGalleryInputsScreen} options={{ title: 'Inputs' }} />
+              <SecurityStack.Screen name="UIGallery" component={UIGalleryScreen} options={{ title: 'Galerie UI' }} />
+              <SecurityStack.Screen name="UIGalleryAtoms" component={UIGalleryAtomsScreen} options={{ title: 'Atomes' }} />
+              <SecurityStack.Screen name="UIGalleryInputs" component={UIGalleryInputsScreen} options={{ title: 'Champs' }} />
               <SecurityStack.Screen
                 name="UIGallerySurfaces"
                 component={UIGallerySurfacesScreen}
@@ -309,9 +309,9 @@ function SecurityStackScreen() {
               <SecurityStack.Screen
                 name="UIGalleryPatterns"
                 component={UIGalleryPatternsScreen}
-                options={{ title: 'Patterns' }}
+                options={{ title: 'Structures' }}
               />
-              <SecurityStack.Screen name="UIGalleryStates" component={UIGalleryStatesScreen} options={{ title: 'States' }} />
+              <SecurityStack.Screen name="UIGalleryStates" component={UIGalleryStatesScreen} options={{ title: 'États' }} />
             </>
           ) : null}
         </>
@@ -352,7 +352,7 @@ function EnterpriseStackScreen() {
             <EnterpriseStack.Screen name="OrgAdmin" component={OrgsAdminScreen} options={{ title: 'Paramètres org' }} />
           ) : null}
           {availableModules.includes('company') ? (
-            <EnterpriseStack.Screen name="CompanyHub" component={CompanyHubScreen} options={{ title: 'Company Hub' }} />
+            <EnterpriseStack.Screen name="CompanyHub" component={CompanyHubScreen} options={{ title: 'Espace entreprise' }} />
           ) : null}
           {availableModules.includes('offers') ? (
             <EnterpriseStack.Screen name="Offers" component={OfferManagementScreen} options={{ title: 'Offres' }} />

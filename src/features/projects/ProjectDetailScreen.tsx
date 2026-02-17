@@ -164,7 +164,7 @@ export function ProjectDetailScreen({ route, navigation }: Props) {
     try {
       const reason = await quotas.explainUploadBlock(0);
       if (reason) {
-        Alert.alert('Upload bloqué', reason);
+        Alert.alert('Téléversement bloqué', reason);
         return;
       }
 
@@ -258,21 +258,21 @@ export function ProjectDetailScreen({ route, navigation }: Props) {
           <View style={{ alignItems: 'flex-end', gap: 6 }}>
             {indicator ? (
               <Text variant="caption" style={{ color: indicator.riskLevel === 'RISK' ? colors.rose : indicator.riskLevel === 'WATCH' ? colors.amber : colors.mint }}>
-                Risque: {indicator.riskLevel}
+                Risque: {indicator.riskLevel === 'RISK' ? 'RISQUE' : indicator.riskLevel === 'WATCH' ? 'VIGILANCE' : 'OK'}
               </Text>
             ) : null}
             {syncStatus.phase === 'offline' ? (
               <Text variant="caption" style={{ color: colors.amber }}>
-                Offline
+                Hors ligne
               </Text>
             ) : (
               <Text variant="caption" style={{ color: colors.mint }}>
-                Online
+                En ligne
               </Text>
             )}
             {pendingSyncCount > 0 ? (
               <Text variant="caption" style={{ color: colors.amber }}>
-                Pending: {pendingSyncCount}
+                En attente: {pendingSyncCount}
               </Text>
             ) : null}
             {errorsCount > 0 ? (

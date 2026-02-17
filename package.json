@@ -9,6 +9,7 @@
     "android": "expo start --android",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
+    "i18n:scan": "node ./scripts/i18n-scan.mjs",
     "security:scan": "node ./scripts/security-scan.mjs",
     "security:release-check": "npm run typecheck && npm run security:scan"
   },

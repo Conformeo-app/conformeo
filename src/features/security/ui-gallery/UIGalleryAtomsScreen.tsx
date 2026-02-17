@@ -22,7 +22,7 @@ export function UIGalleryAtomsScreen() {
 
   return (
     <Screen>
-      <SectionHeader title="UI Gallery — Atoms" subtitle="Text, Icon, Badge, Tag, Chip, Divider, Avatar…" />
+      <SectionHeader title="Galerie UI — Atomes" subtitle="Texte, icônes, badges, tags, chips, séparateurs, avatars…" />
 
       <ScrollView
         style={{ flex: 1 }}
@@ -30,7 +30,7 @@ export function UIGalleryAtomsScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Card>
-          <Text variant="h2">Text (variants)</Text>
+          <Text variant="h2">Texte (variantes)</Text>
           <Text variant="caption" style={{ color: colors.mutedText, marginTop: spacing.xs }}>
             Limiter à 3 tailles max par écran (éviter le patchwork).
           </Text>
@@ -48,7 +48,7 @@ export function UIGalleryAtomsScreen() {
         </Card>
 
         <Card>
-          <Text variant="h2">Icon / Divider</Text>
+          <Text variant="h2">Icônes / séparateur</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
             <Icon name="camera" size={22} />
             <Icon name="hard-hat" size={22} />
@@ -80,10 +80,10 @@ export function UIGalleryAtomsScreen() {
         <Card>
           <Text variant="h2">Tags</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
-            <Tag label="neutral" />
+            <Tag label="neutre" />
             <Tag label="info" tone="info" />
-            <Tag label="success" tone="success" />
-            <Tag label="warning" tone="warning" />
+            <Tag label="succès" tone="success" />
+            <Tag label="vigilance" tone="warning" />
             <Tag label="danger" tone="danger" />
           </View>
         </Card>

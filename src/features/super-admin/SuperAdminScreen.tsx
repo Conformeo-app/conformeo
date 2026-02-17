@@ -211,7 +211,7 @@ export function SuperAdminScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ paddingBottom: spacing.lg }} keyboardShouldPersistTaps="handled">
-        <SectionHeader title="Super Admin" subtitle={headerSubtitle} />
+        <SectionHeader title="Super-admin" subtitle={headerSubtitle} />
 
         <View style={{ gap: spacing.md }}>
           <Card>
@@ -326,4 +326,3 @@ export function SuperAdminScreen() {
     </Screen>
   );
 }
-

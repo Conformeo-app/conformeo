@@ -368,8 +368,8 @@ export function CompanyHubScreen() {
   const commonHeader = (
     <View style={{ gap: spacing.md, marginBottom: spacing.sm }}>
       <SectionHeader
-        title="Company Hub"
-        subtitle="Documents internes, certifications et sécurité des locaux — offline-first."
+        title="Espace entreprise"
+        subtitle="Documents internes, certifications et sécurité des locaux — hors ligne d'abord."
       />
 
       {tabsHeader}
@@ -377,7 +377,7 @@ export function CompanyHubScreen() {
       <Card>
         <Text variant="h2">État entreprise</Text>
         <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
-          Rôle: {role ?? 'FIELD'} · Édition {canEdit ? 'autorisée' : 'désactivée (lecture seule)'}
+          Rôle: {role ?? 'TERRAIN'} · Édition {canEdit ? 'autorisée' : 'désactivée (lecture seule)'}
         </Text>
         <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
           Certifications à surveiller (60 jours): {expiringCerts.length}

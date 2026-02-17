@@ -828,7 +828,7 @@ export function ControlModeScreen(
                         }}
                       >
                         <Text variant="caption" style={{ color: colors.slate }}>
-                          {asset.mime === 'application/pdf' ? 'PDF' : 'thumb'}
+                          {asset.mime === 'application/pdf' ? 'PDF' : 'vignette'}
                         </Text>
                       </View>
                     )}
@@ -913,7 +913,7 @@ export function ControlModeScreen(
                     }}
                   >
                     <Text variant="caption" style={{ color: colors.slate }}>
-                      {item.mime === 'application/pdf' ? 'PDF' : 'Thumb indisponible'}
+                      {item.mime === 'application/pdf' ? 'PDF' : 'Vignette indisponible'}
                     </Text>
                   </View>
                 )}

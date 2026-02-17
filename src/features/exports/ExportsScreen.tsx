@@ -15,16 +15,16 @@ import { SectionHeader } from '../common/SectionHeader';
 const DEMO_PROJECT_ID = 'chantier-conformeo-demo';
 
 const EXPORT_TYPES: Array<{ value: ExportType; label: string; hint: string }> = [
-  { value: 'REPORT_PDF', label: 'Rapport chantier', hint: 'PDF synthese + preuves en vignettes' },
-  { value: 'CONTROL_PACK', label: 'Pack controle', hint: 'ZIP: PDF + annexes (preuves/docs)' },
-  { value: 'DOE_ZIP', label: 'Dossier complet', hint: 'ZIP DOE complet + manifest' }
+  { value: 'REPORT_PDF', label: 'Rapport chantier', hint: 'PDF synthèse + preuves en vignettes' },
+  { value: 'CONTROL_PACK', label: 'Pack contrôle', hint: 'ZIP : PDF + annexes (preuves/docs)' },
+  { value: 'DOE_ZIP', label: 'Dossier complet', hint: 'ZIP DOE complet + manifeste' }
 ];
 
 function statusLabel(status: ExportJob['status']) {
-  if (status === 'PENDING') return 'PENDING';
-  if (status === 'RUNNING') return 'RUNNING';
-  if (status === 'DONE') return 'DONE';
-  return 'FAILED';
+  if (status === 'PENDING') return 'En attente';
+  if (status === 'RUNNING') return 'En cours';
+  if (status === 'DONE') return 'Terminé';
+  return 'Échec';
 }
 
 function statusColor(status: ExportJob['status']) {

@@ -38,10 +38,22 @@ function riskTone(level: ProjectIndicators['riskLevel']): TagTone {
   return 'success';
 }
 
+function riskLabel(level: ProjectIndicators['riskLevel']) {
+  if (level === 'RISK') return 'RISQUE';
+  if (level === 'WATCH') return 'VIGILANCE';
+  return 'OK';
+}
+
 function syncTone(level: ProjectIndicators['syncState']): TagTone {
   if (level === 'ERROR') return 'danger';
   if (level === 'PENDING') return 'warning';
   return 'success';
+}
+
+function syncLabel(level: ProjectIndicators['syncState']) {
+  if (level === 'ERROR') return 'ÉCHEC';
+  if (level === 'PENDING') return 'EN ATTENTE';
+  return 'OK';
 }
 
 function formatDateShort(iso?: string) {
@@ -137,8 +149,8 @@ function ProjectPreview({
           </View>
 
           <View style={{ alignItems: 'flex-end', gap: spacing.xs }}>
-            {indicator ? <Tag label={`Risque ${indicator.riskLevel}`} tone={riskTone(indicator.riskLevel)} /> : null}
-            {indicator ? <Tag label={`Sync ${indicator.syncState}`} tone={syncTone(indicator.syncState)} /> : null}
+            {indicator ? <Tag label={`Risque ${riskLabel(indicator.riskLevel)}`} tone={riskTone(indicator.riskLevel)} /> : null}
+            {indicator ? <Tag label={`Sync ${syncLabel(indicator.syncState)}`} tone={syncTone(indicator.syncState)} /> : null}
           </View>
         </View>
 
@@ -376,7 +388,7 @@ export function ProjectsListScreen({ navigation }: Props) {
 
               {syncStatus.phase === 'offline' ? (
                 <Text variant="caption" style={{ color: colors.amber, marginTop: spacing.sm }}>
-                  Offline: navigation et création locales OK.
+                  Hors ligne : navigation et création locales OK.
                 </Text>
               ) : null}
 
@@ -422,8 +434,8 @@ export function ProjectsListScreen({ navigation }: Props) {
                         </View>
 
                         <View style={{ alignItems: 'flex-end', gap: spacing.xs }}>
-                          {indicator ? <Tag label={indicator.riskLevel} tone={riskTone(indicator.riskLevel)} /> : null}
-                          {indicator ? <Tag label={indicator.syncState} tone={syncTone(indicator.syncState)} /> : null}
+                          {indicator ? <Tag label={riskLabel(indicator.riskLevel)} tone={riskTone(indicator.riskLevel)} /> : null}
+                          {indicator ? <Tag label={syncLabel(indicator.syncState)} tone={syncTone(indicator.syncState)} /> : null}
                         </View>
                       </View>
 

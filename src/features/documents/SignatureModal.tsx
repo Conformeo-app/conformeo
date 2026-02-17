@@ -283,7 +283,7 @@ export function SignatureModal({ visible, document, version, actor, onClose, onC
 
         {offlineWarning ? (
           <Text variant="caption" style={{ color: colors.amber, marginTop: spacing.xs }}>
-            Offline: la signature sera finalisee a la sync.
+            Hors ligne : la signature sera finalisée à la synchronisation.
           </Text>
         ) : null}
 

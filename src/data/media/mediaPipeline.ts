@@ -191,7 +191,7 @@ async function recoverInterruptedUploads() {
     `
       UPDATE ${TABLE_NAME}
       SET upload_status = 'FAILED',
-          last_error = COALESCE(last_error, 'Upload interrompu: reprise au prochain cycle.'),
+          last_error = COALESCE(last_error, 'Téléversement interrompu : reprise au prochain cycle.'),
           retry_count = retry_count + 1
       WHERE upload_status = 'UPLOADING'
     `

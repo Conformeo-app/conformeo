@@ -1172,7 +1172,7 @@ export function PlansScreen({ projectId }: { projectId?: string } = {}) {
         <View style={{ gap: spacing.md, marginBottom: spacing.sm }}>
           <SectionHeader
             title="Plans"
-            subtitle="Plans (documents) + pins normalises (x,y 0..1) + liens taches / preuves / docs. Offline-first."
+            subtitle="Plans (documents) + pins normalisés (x,y 0..1) + liens tâches / preuves / docs. Hors ligne d'abord."
           />
 
           <Card>

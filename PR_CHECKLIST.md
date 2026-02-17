@@ -47,3 +47,4 @@ Cette checklist est obligatoire pour toute PR qui touche l’UI.
 
 - [ ] Test manuel iPad + iPhone.
 - [ ] Test manuel offline (mode avion).
+- [ ] Aucun texte UI en anglais visible (j’ai lancé `npm run i18n:scan`).

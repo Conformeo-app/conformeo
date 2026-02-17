@@ -35,7 +35,7 @@ export function UIGalleryPatternsScreen() {
 
   return (
     <Screen>
-      <SectionHeader title="UI Gallery — Patterns" subtitle="SplitView, TabsBar, DrawerPanel (iPad/iPhone)" />
+      <SectionHeader title="Galerie UI — Structures" subtitle="SplitView, barre d'onglets, panneau latéral (iPad/iPhone)" />
 
       <ScrollView
         style={{ flex: 1 }}
@@ -43,7 +43,7 @@ export function UIGalleryPatternsScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Card>
-          <Text variant="h2">TabsBar</Text>
+          <Text variant="h2">Barre d'onglets</Text>
           <Text variant="caption" style={{ color: colors.mutedText, marginTop: spacing.xs }}>
             Exemple de barre d’onglets DS (scrollable) — alternative UI réutilisable.
           </Text>
@@ -61,13 +61,13 @@ export function UIGalleryPatternsScreen() {
         </Card>
 
         <Card>
-          <Text variant="h2">DrawerPanel</Text>
+          <Text variant="h2">Panneau latéral</Text>
           <Text variant="caption" style={{ color: colors.mutedText, marginTop: spacing.xs }}>
             iPad: drawer à droite. iPhone: bottom sheet. Usage typique: filtres avancés / quick create.
           </Text>
 
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
-            <Button label="Ouvrir drawer" variant="secondary" onPress={() => setDrawerOpen(true)} />
+            <Button label="Ouvrir le panneau" variant="secondary" onPress={() => setDrawerOpen(true)} />
           </View>
         </Card>
 
@@ -93,7 +93,7 @@ export function UIGalleryPatternsScreen() {
                   <Card>
                     <Text variant="h2">Détail</Text>
                     <Text variant="body" style={{ color: colors.mutedText, marginTop: spacing.xs }}>
-                      Contenu detail (scrollable si nécessaire, mais éviter les scrolls imbriqués).
+                      Contenu détail (scrollable si nécessaire, mais éviter les scrolls imbriqués).
                     </Text>
                   </Card>
                 </View>
@@ -107,10 +107,10 @@ export function UIGalleryPatternsScreen() {
         <View style={{ gap: spacing.md }}>
           <TextField label="Recherche" value="" onChangeText={() => {}} placeholder="Filtrer…" />
           <Text variant="caption" style={{ color: colors.mutedText }}>
-            Les filtres avancés doivent toujours avoir un bouton "Reset".
+            Les filtres avancés doivent toujours avoir un bouton "Réinitialiser".
           </Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-            <Button label="Reset" variant="ghost" onPress={() => {}} />
+            <Button label="Réinitialiser" variant="ghost" onPress={() => {}} />
             <Button label="Appliquer" onPress={() => setDrawerOpen(false)} />
           </View>
         </View>

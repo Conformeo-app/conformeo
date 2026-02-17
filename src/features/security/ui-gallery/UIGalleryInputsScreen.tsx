@@ -34,7 +34,7 @@ export function UIGalleryInputsScreen() {
 
   return (
     <Screen>
-      <SectionHeader title="UI Gallery — Inputs" subtitle="TextField, SearchInput, Toggle, SegmentedControl, dictée…" />
+      <SectionHeader title="Galerie UI — Champs" subtitle="Champs texte, recherche, toggle, sélection, dictée…" />
 
       <ScrollView
         style={{ flex: 1 }}
@@ -42,16 +42,16 @@ export function UIGalleryInputsScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Card>
-          <Text variant="h2">SearchInput</Text>
+          <Text variant="h2">Recherche</Text>
           <View style={{ marginTop: spacing.md }}>
             <SearchInput value={search} onChangeText={setSearch} placeholder="Rechercher…" />
           </View>
         </Card>
 
         <Card>
-          <Text variant="h2">TextField</Text>
+          <Text variant="h2">Champ texte</Text>
           <Text variant="caption" style={{ color: colors.mutedText, marginTop: spacing.xs }}>
-            Min height 44px, erreurs actionnables, pas de couleurs hardcodées.
+            Hauteur min 44px, erreurs actionnables, pas de couleurs hardcodées.
           </Text>
 
           <View style={{ gap: spacing.md, marginTop: spacing.md }}>
@@ -66,21 +66,21 @@ export function UIGalleryInputsScreen() {
         </Card>
 
         <Card>
-          <Text variant="h2">Toggle</Text>
+          <Text variant="h2">Interrupteur</Text>
           <View style={{ marginTop: spacing.md }}>
             <Toggle label="Mode contrôle" value={toggle} onValueChange={setToggle} />
           </View>
         </Card>
 
         <Card>
-          <Text variant="h2">SegmentedControl</Text>
+          <Text variant="h2">Sélecteur</Text>
           <View style={{ marginTop: spacing.md }}>
             <SegmentedControl value={segment} options={segments} onChange={setSegment} />
           </View>
         </Card>
 
         <Card>
-          <Text variant="h2">VoiceInputButton</Text>
+          <Text variant="h2">Bouton dictée</Text>
           <Text variant="caption" style={{ color: colors.mutedText, marginTop: spacing.xs }}>
             UI uniquement. La disponibilité dépend du build (Expo Go vs dev build).
           </Text>
@@ -95,4 +95,3 @@ export function UIGalleryInputsScreen() {
     </Screen>
   );
 }
-

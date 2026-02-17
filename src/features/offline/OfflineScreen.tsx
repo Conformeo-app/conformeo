@@ -14,7 +14,7 @@ function toStatusLabel(phase: 'idle' | 'syncing' | 'offline' | 'error') {
   if (phase === 'syncing') return 'Synchronisation en cours';
   if (phase === 'offline') return 'Mode hors ligne';
   if (phase === 'error') return 'Erreur de synchronisation';
-  return 'Synchronisation idle';
+  return 'Synchronisation OK';
 }
 
 export function OfflineScreen() {
@@ -74,34 +74,34 @@ export function OfflineScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <SectionHeader
-          title="Offline-first"
-          subtitle="Base locale prioritaire, synchronisation asynchrone et resiliente."
+          title="Hors ligne d'abord"
+          subtitle="Base locale prioritaire, synchronisation asynchrone et résiliente."
         />
 
         <View style={{ gap: spacing.md }}>
           <Card>
-            <Text variant="h2">Etat de synchronisation</Text>
+            <Text variant="h2">État de synchronisation</Text>
             <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
               {toStatusLabel(status.phase)}
             </Text>
             <Text variant="body" style={{ color: colors.slate, marginTop: spacing.xs }}>
-              Operations en attente: {status.queueDepth}
+              Opérations en attente: {status.queueDepth}
             </Text>
             <Text
               variant="body"
               style={{ color: status.deadLetterCount > 0 ? colors.rose : colors.slate, marginTop: spacing.xs }}
             >
-              Operations en echec terminal: {status.deadLetterCount}
+              Opérations en échec terminal: {status.deadLetterCount}
             </Text>
             {status.lastResult ? (
               <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
-                Dernier cycle - push:{status.lastResult.pushed}, retry:{status.lastResult.failed}, dead:
+                Dernier cycle - envoyés:{status.lastResult.pushed}, retentatives:{status.lastResult.failed}, terminaux:
                 {status.lastResult.dead}
               </Text>
             ) : null}
             {status.lastSyncedAt ? (
               <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
-                Derniere sync: {new Date(status.lastSyncedAt).toLocaleTimeString()}
+                Dernière synchronisation: {new Date(status.lastSyncedAt).toLocaleTimeString()}
               </Text>
             ) : null}
             {status.lastError ? (
@@ -112,10 +112,10 @@ export function OfflineScreen() {
           </Card>
 
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-            <Button label="Rafraichir" onPress={() => void refreshAll()} />
-            <Button label="Ajouter operation demo" kind="ghost" onPress={() => void enqueueDemo()} />
+            <Button label="Rafraîchir" onPress={() => void refreshAll()} />
+            <Button label="Ajouter opération démo" kind="ghost" onPress={() => void enqueueDemo()} />
             <Button label="Synchroniser" onPress={() => void syncNow()} />
-            <Button label="Rejouer erreurs" kind="ghost" onPress={() => void replayDeadLetters()} />
+            <Button label="Rejouer les erreurs" kind="ghost" onPress={() => void replayDeadLetters()} />
           </View>
 
           <Card>

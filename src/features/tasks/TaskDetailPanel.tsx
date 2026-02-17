@@ -10,6 +10,19 @@ import { useTheme } from '../../ui/theme/ThemeProvider';
 const STATUS_ORDER: TaskStatus[] = ['TODO', 'DOING', 'DONE', 'BLOCKED'];
 const PRIORITY_ORDER: TaskPriority[] = ['LOW', 'MEDIUM', 'HIGH'];
 
+function statusLabel(status: TaskStatus) {
+  if (status === 'TODO') return 'À faire';
+  if (status === 'DOING') return 'En cours';
+  if (status === 'DONE') return 'Terminée';
+  return 'Bloquée';
+}
+
+function priorityLabel(priority: TaskPriority) {
+  if (priority === 'LOW') return 'Faible';
+  if (priority === 'MEDIUM') return 'Moyenne';
+  return 'Haute';
+}
+
 function parseTagsInput(input: string) {
   return input
     .split(',')
@@ -96,13 +109,13 @@ export function TaskDetailPanel({
   if (!task) {
     return (
       <Card>
-        <Text variant="h2">Detail tache</Text>
+        <Text variant="h2">Détail tâche</Text>
         <Text variant="body" style={{ color: colors.slate, marginTop: spacing.sm }}>
-          Selectionnez une tache a gauche.
+          Sélectionnez une tâche à gauche.
         </Text>
         {onOpenCreate ? (
           <View style={{ marginTop: spacing.md }}>
-            <Button label="Creer une tache" onPress={onOpenCreate} />
+            <Button label="Créer une tâche" onPress={onOpenCreate} />
           </View>
         ) : null}
       </Card>
@@ -114,7 +127,7 @@ export function TaskDetailPanel({
   return (
     <Card style={{ flex: 1, minHeight: 0 }}>
       <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-        <Text variant="h2">Detail tache</Text>
+        <Text variant="h2">Détail tâche</Text>
         <Text variant="bodyStrong" style={{ marginTop: spacing.xs }}>
           {task.title}
         </Text>
@@ -123,7 +136,7 @@ export function TaskDetailPanel({
           {STATUS_ORDER.map((status) => (
             <Button
               key={status}
-              label={status}
+              label={statusLabel(status)}
               kind={task.status === status ? 'primary' : 'ghost'}
               onPress={() => onSetStatus(status)}
               disabled={busy}
@@ -133,7 +146,7 @@ export function TaskDetailPanel({
 
         {suggestions.length > 0 ? (
           <View style={{ marginTop: spacing.md, padding: spacing.md, borderRadius: radii.md, backgroundColor: colors.mint }}>
-            <Text variant="bodyStrong">Suggeres</Text>
+            <Text variant="bodyStrong">Suggestions</Text>
             <View style={{ marginTop: spacing.xs, gap: spacing.sm }}>
               {suggestions.slice(0, 2).map((suggestion) => (
                 <View key={suggestion.id} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
@@ -150,13 +163,13 @@ export function TaskDetailPanel({
         ) : null}
 
         <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.md }}>
-          Priorite
+          Priorité
         </Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs }}>
           {PRIORITY_ORDER.map((priority) => (
             <Button
               key={priority}
-              label={priority}
+              label={priorityLabel(priority)}
               kind={task.priority === priority ? 'primary' : 'ghost'}
               onPress={() => onUpdate({ priority })}
               disabled={busy}
@@ -193,7 +206,7 @@ export function TaskDetailPanel({
 
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
           <Button
-            label={isListening && activeField === 'description' ? 'Stop dictee' : 'Dictee'}
+            label={isListening && activeField === 'description' ? 'Arrêter dictée' : 'Dictée'}
             kind="ghost"
             onPress={() => onToggleDictation('description', { initialText: descriptionDraft, onText: setDescriptionDraft })}
             disabled={busy || !dictationAvailable}
@@ -204,7 +217,7 @@ export function TaskDetailPanel({
         <TextInput
           value={tagsDraft}
           onChangeText={setTagsDraft}
-          placeholder="Tags (csv)"
+          placeholder="Tags (séparés par des virgules)"
           placeholderTextColor={colors.slate}
           style={{
             borderWidth: 1,
@@ -218,8 +231,8 @@ export function TaskDetailPanel({
         />
 
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
-          <Button label="Enregistrer tags" kind="ghost" onPress={saveTags} disabled={busy} />
-          <Button label="Supprimer (soft)" kind="ghost" onPress={onSoftDelete} disabled={busy} />
+          <Button label="Enregistrer les tags" kind="ghost" onPress={saveTags} disabled={busy} />
+          <Button label="Supprimer (non définitif)" kind="ghost" onPress={onSoftDelete} disabled={busy} />
         </View>
 
         <Text variant="h2" style={{ marginTop: spacing.lg }}>
@@ -234,7 +247,7 @@ export function TaskDetailPanel({
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
           {media.length === 0 ? (
             <Text variant="caption" style={{ color: colors.slate }}>
-              Aucune preuve liee.
+              Aucune preuve liée.
             </Text>
           ) : (
             media.slice(0, 60).map((asset) => (
@@ -257,7 +270,7 @@ export function TaskDetailPanel({
                     }}
                   >
                     <Text variant="caption" style={{ color: colors.slate }}>
-                      {isPdf(asset) ? 'PDF' : 'thumb'}
+                      {isPdf(asset) ? 'PDF' : 'vignette'}
                     </Text>
                   </View>
                 )}
@@ -288,7 +301,7 @@ export function TaskDetailPanel({
 
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
           <Button
-            label={isListening && activeField === 'comment' ? 'Stop dictee' : 'Dictee'}
+            label={isListening && activeField === 'comment' ? 'Arrêter dictée' : 'Dictée'}
             kind="ghost"
             onPress={() => onToggleDictation('comment', { initialText: commentDraft, onText: setCommentDraft })}
             disabled={busy || !dictationAvailable}
@@ -309,7 +322,7 @@ export function TaskDetailPanel({
 
         {!dictationAvailable ? (
           <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.md }}>
-            Dictee native indisponible sur ce build (fallback clavier dictee).
+            Dictée native indisponible sur ce build (fallback clavier / dictée système).
           </Text>
         ) : null}
       </ScrollView>

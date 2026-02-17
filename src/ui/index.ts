@@ -15,6 +15,7 @@ export * from './primitives/ListRow';
 export * from './primitives/SectionHeader';
 export * from './primitives/KpiCard';
 export * from './primitives/SearchInput';
+export * from './primitives/ConformeoTextField';
 export * from './primitives/Toggle';
 
 export * from './patterns/SplitView';
@@ -27,4 +28,3 @@ export * from './states/EmptyState';
 export * from './states/ErrorState';
 export * from './states/OfflineBanner';
 export * from './states/SyncStatusPill';
-

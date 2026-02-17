@@ -25,7 +25,7 @@ export type ModuleKey =
 
 export const modules: Array<{ key: ModuleKey; label: string; hint: string }> = [
   { key: 'dashboard', label: 'Tableau de bord', hint: 'Synthèse terrain' },
-  { key: 'accelerators', label: 'Accélérateurs', hint: 'Quick actions & modèles' },
+  { key: 'accelerators', label: 'Accélérateurs', hint: 'Actions rapides & modèles' },
   { key: 'orgs', label: 'Entreprise', hint: 'Équipe, paramètres, modules' },
   { key: 'company', label: 'Espace entreprise', hint: 'Docs internes, certifs, sécurité' },
   { key: 'tasks', label: 'Tâches', hint: 'Création rapide + preuves' },
@@ -36,7 +36,7 @@ export const modules: Array<{ key: ModuleKey; label: string; hint: string }> = [
   { key: 'offers', label: 'Offres', hint: 'Plans SaaS + modules + tarification' },
   { key: 'documents', label: 'Documents', hint: 'Dossiers + versions' },
   { key: 'exports', label: 'Exports', hint: 'PDF + ZIP DOE' },
-  { key: 'control', label: 'Controle', hint: 'Inspection lecture seule' },
+  { key: 'control', label: 'Contrôle', hint: 'Inspection lecture seule' },
   { key: 'search', label: 'Recherche', hint: 'Globale & modules' },
   { key: 'audit', label: 'Audit', hint: 'Traçabilité conformité' },
   { key: 'offline', label: 'Hors ligne', hint: 'Synchronisation & conflits' },

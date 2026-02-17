@@ -851,6 +851,14 @@ function toActivity(entity: DashboardActivityEntity, id: string, at: string, tit
   } satisfies DashboardActivity;
 }
 
+function uploadStatusLabel(status: string) {
+  if (status === 'UPLOADED') return 'Envoyé';
+  if (status === 'UPLOADING') return 'En cours';
+  if (status === 'FAILED') return 'Échec';
+  if (status === 'PENDING') return 'En attente';
+  return status;
+}
+
 async function loadActivity(db: SQLite.SQLiteDatabase, scope: DashboardScope, limit: number) {
   const safeLimit = Math.max(1, Math.min(limit, ACTIVITY_MAX_LIMIT));
 
@@ -871,7 +879,7 @@ async function loadActivity(db: SQLite.SQLiteDatabase, scope: DashboardScope, li
         `task-${task.id}`,
         task.updated_at,
         task.title,
-        `Statut ${task.status} - Priorite ${task.priority}`,
+        `Statut ${task.status} — Priorité ${task.priority}`,
         task.project_id
       )
     );
@@ -884,7 +892,7 @@ async function loadActivity(db: SQLite.SQLiteDatabase, scope: DashboardScope, li
         `media-${proof.id}`,
         proof.created_at,
         `Preuve ${proof.tag ?? proof.mime}`,
-        `Upload ${proof.upload_status}`,
+        `Téléversement ${uploadStatusLabel(proof.upload_status)}`,
         proof.project_id
       )
     );
@@ -922,7 +930,7 @@ async function loadActivity(db: SQLite.SQLiteDatabase, scope: DashboardScope, li
         'SYNC',
         `sync-${failure.id}`,
         failure.created_at,
-        `Erreur sync ${failure.entity}`,
+        `Erreur de synchronisation ${failure.entity}`,
         toOptional(failure.last_error)
       )
     );

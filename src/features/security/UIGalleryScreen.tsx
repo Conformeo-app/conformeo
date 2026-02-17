@@ -32,8 +32,8 @@ export function UIGalleryScreen({ navigation }: Props) {
   const quotaOptions = useMemo(
     () => [
       { key: 'OK' as const, label: 'Quota OK' },
-      { key: 'WARN' as const, label: 'Quota WARN' },
-      { key: 'CRIT' as const, label: 'Quota CRIT' }
+      { key: 'WARN' as const, label: 'Quota 80%' },
+      { key: 'CRIT' as const, label: 'Quota 95%+' }
     ],
     []
   );
@@ -41,8 +41,8 @@ export function UIGalleryScreen({ navigation }: Props) {
   return (
     <Screen>
       <SectionHeader
-        title="UI Gallery"
-        subtitle="Catalogue interne du Design System (DEV). Objectif: cohérence, accessibilité, iPad-first."
+        title="Galerie UI"
+        subtitle="Catalogue interne du Design System (DEV). Objectif: cohérence, accessibilité, iPad d'abord."
       />
 
       <View style={{ gap: spacing.md, flex: 1, minHeight: 0 }}>
@@ -54,32 +54,32 @@ export function UIGalleryScreen({ navigation }: Props) {
 
           <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
             <ListRow
-              title="Atoms"
-              subtitle="Text, Icon, Badge, Tag, Chip, Divider, Avatar…"
+              title="Atomes"
+              subtitle="Texte, icônes, badges, tags, chips, séparateurs, avatars…"
               leftIcon="cube-outline"
               onPress={() => navigation.navigate('UIGalleryAtoms')}
             />
             <ListRow
-              title="Inputs"
-              subtitle="TextField, SearchInput, Toggle, SegmentedControl, dictée…"
+              title="Champs"
+              subtitle="Champs texte, recherche, toggle, segmented, dictée…"
               leftIcon="form-textbox"
               onPress={() => navigation.navigate('UIGalleryInputs')}
             />
             <ListRow
               title="Surfaces"
-              subtitle="Card, KPI, ListRow, FAB…"
+              subtitle="Cartes, KPI, lignes, bouton flottant…"
               leftIcon="layers-outline"
               onPress={() => navigation.navigate('UIGallerySurfaces')}
             />
             <ListRow
-              title="Patterns"
-              subtitle="SplitView, TabsBar, DrawerPanel…"
+              title="Structures"
+              subtitle="SplitView (liste/détail), barre d'onglets, panneau latéral…"
               leftIcon="view-split-vertical"
               onPress={() => navigation.navigate('UIGalleryPatterns')}
             />
             <ListRow
-              title="States"
-              subtitle="Offline, pending sync, quota, conflits, erreurs…"
+              title="États"
+              subtitle="Hors ligne, synchro en attente, quota, conflits, erreurs…"
               leftIcon="alert-circle-outline"
               onPress={() => navigation.navigate('UIGalleryStates')}
             />
@@ -87,14 +87,14 @@ export function UIGalleryScreen({ navigation }: Props) {
         </Card>
 
         <Card>
-          <Text variant="h2">Playground (states)</Text>
+          <Text variant="h2">Terrain de jeu (états)</Text>
           <Text variant="caption" style={{ color: colors.mutedText, marginTop: spacing.xs }}>
-            Simule offline/pending/quota/conflits pour valider les composants d’état. Zéro dépendance réseau.
+            Simule hors ligne/en attente/quota/conflits pour valider les composants d’état. Zéro dépendance réseau.
           </Text>
 
           <View style={{ gap: spacing.md, marginTop: spacing.md }}>
             <Toggle
-              label="Offline"
+              label="Hors ligne"
               value={state.offline}
               onValueChange={(v) => gallery.setOffline(v)}
             />
@@ -102,7 +102,7 @@ export function UIGalleryScreen({ navigation }: Props) {
             <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm }}>
               <View style={{ flex: 1 }}>
                 <TextField
-                  label="Pending ops"
+                  label="Ops en attente"
                   keyboardType="number-pad"
                   value={String(state.pendingOps)}
                   onChangeText={(v) => gallery.setPendingOps(clampInt(v, state.pendingOps))}
@@ -132,13 +132,13 @@ export function UIGalleryScreen({ navigation }: Props) {
             />
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-              <Button label="Reset" variant="ghost" onPress={() => {
+              <Button label="Réinitialiser" variant="ghost" onPress={() => {
                 gallery.setOffline(false);
                 gallery.setPendingOps(0);
                 gallery.setConflicts(0);
                 gallery.setQuotaLevel('OK');
               }} />
-              <Button label="Aller à States" variant="secondary" onPress={() => navigation.navigate('UIGalleryStates')} />
+              <Button label="Aller aux états" variant="secondary" onPress={() => navigation.navigate('UIGalleryStates')} />
             </View>
           </View>
         </Card>
@@ -146,4 +146,3 @@ export function UIGalleryScreen({ navigation }: Props) {
     </Screen>
   );
 }
-

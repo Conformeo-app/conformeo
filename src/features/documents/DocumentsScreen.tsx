@@ -84,6 +84,18 @@ function statusTint(status: DocumentStatus, palette: { amber: string; teal: stri
   return palette.mint;
 }
 
+function statusLabel(status: DocumentStatus) {
+  if (status === 'DRAFT') return 'Brouillon';
+  if (status === 'FINAL') return 'Final';
+  return 'Signé';
+}
+
+function signatureStatusLabel(status: SignatureRecord['status']) {
+  if (status === 'DRAFT') return 'Brouillon';
+  if (status === 'PENDING') return 'En attente';
+  return 'Finalisée';
+}
+
 function isPdfVersion(version: DocumentVersion | null) {
   return Boolean(version && version.file_mime === 'application/pdf');
 }
@@ -496,7 +508,7 @@ function NewDocumentModal({
         <Card style={{ flex: 1, minHeight: 0 }}>
           <Text variant="h2">Nouveau document</Text>
           <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
-            Offline-first. Tu peux importer le fichier maintenant ou ajouter une version plus tard.
+            Hors ligne d'abord. Tu peux importer le fichier maintenant ou ajouter une version plus tard.
           </Text>
 
           <TextInput
@@ -674,7 +686,7 @@ function DocumentDetailPanel({
 
           <View style={{ alignItems: 'flex-end', gap: spacing.xs }}>
             <View style={{ backgroundColor: statusColor, borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs }}>
-              <Text variant="caption">{document.status}</Text>
+              <Text variant="caption">{statusLabel(document.status)}</Text>
             </View>
             {onClose ? <Button label="Fermer" kind="ghost" onPress={onClose} disabled={busy} /> : null}
           </View>
@@ -733,9 +745,9 @@ function DocumentDetailPanel({
           Statut
         </Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
-          <Button label="DRAFT" kind={document.status === 'DRAFT' ? 'primary' : 'ghost'} onPress={() => onSetStatus('DRAFT')} disabled={busy} />
-          <Button label="FINAL" kind={document.status === 'FINAL' ? 'primary' : 'ghost'} onPress={() => onSetStatus('FINAL')} disabled={busy} />
-          <Button label="Supprimer (soft)" kind="ghost" onPress={onSoftDelete} disabled={busy} />
+          <Button label="Brouillon" kind={document.status === 'DRAFT' ? 'primary' : 'ghost'} onPress={() => onSetStatus('DRAFT')} disabled={busy} />
+          <Button label="Final" kind={document.status === 'FINAL' ? 'primary' : 'ghost'} onPress={() => onSetStatus('FINAL')} disabled={busy} />
+          <Button label="Supprimer (non définitif)" kind="ghost" onPress={onSoftDelete} disabled={busy} />
         </View>
 
         <Text variant="h2" style={{ marginTop: spacing.lg }}>
@@ -824,7 +836,7 @@ function DocumentDetailPanel({
               Signature probante
             </Text>
             <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
-              Une signature génère un PDF signé + un reçu, et passe le document en SIGNED.
+              Une signature génère un PDF signé + un reçu, et passe le document en statut « Signé ».
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
               <Button label="Signer la version active" onPress={() => activeVersion && onStartSignature(activeVersion.id)} disabled={busy || !canSign} />
@@ -846,7 +858,7 @@ function DocumentDetailPanel({
                     }}
                   >
                     <Text variant="caption" style={{ color: colors.slate }} numberOfLines={1}>
-                      {row.status} · local {row.signed_at_local ? formatShortDate(row.signed_at_local) : '—'}
+                      {signatureStatusLabel(row.status)} · local {row.signed_at_local ? formatShortDate(row.signed_at_local) : '—'}
                     </Text>
                     <Text variant="caption" style={{ color: colors.slate }} numberOfLines={1}>
                       hash: {row.file_hash || '—'}
@@ -1182,14 +1194,14 @@ export function DocumentsScreen({ projectId }: { projectId?: string } = {}) {
 
   const header = (
     <View style={{ gap: spacing.md }}>
-      <SectionHeader title="Documents" subtitle="Offline-first, versioning + liens, prêt pour DOE / signature." />
+      <SectionHeader title="Documents" subtitle="Hors ligne d'abord, versioning + liens, prêt pour DOE / signature." />
 
       <Card>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, alignItems: 'center' }}>
           <Button label="+ Document" onPress={() => setCreateOpen(true)} disabled={listBusy || !activeOrgId || !user?.id} />
           <Button label="Rafraîchir" kind="ghost" onPress={() => void loadPage('reset')} disabled={listBusy} />
           <Text variant="caption" style={{ color: colors.slate, alignSelf: 'center' }}>
-            {syncStatus.phase === 'offline' ? 'Offline' : 'Online'} · sync queue {syncStatus.queueDepth}
+            {syncStatus.phase === 'offline' ? 'Hors ligne' : 'En ligne'} · file sync {syncStatus.queueDepth}
           </Text>
         </View>
 
@@ -1256,7 +1268,7 @@ export function DocumentsScreen({ projectId }: { projectId?: string } = {}) {
                 </Text>
               </View>
               <View style={{ backgroundColor: statusColor, borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs }}>
-                <Text variant="caption">{item.status}</Text>
+                <Text variant="caption">{statusLabel(item.status)}</Text>
               </View>
             </View>
           </Card>

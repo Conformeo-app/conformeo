@@ -46,26 +46,26 @@ export function UiGalleryScreen() {
       <SplitView
         left={
           <ScrollView contentContainerStyle={{ padding: t.spacing.lg, gap: t.spacing.md }}>
-            <ConformeoText variant="h2">UI Gallery</ConformeoText>
+            <ConformeoText variant="h2">Galerie UI</ConformeoText>
             <ConformeoText variant="bodySmall" color="textSecondary">
-              Playground (offline / pending / conflicts / quota)
+              Terrain de jeu (hors ligne / en attente / conflits / quota)
             </ConformeoText>
 
             <Card>
-              <ConformeoText variant="h3">Playground</ConformeoText>
+              <ConformeoText variant="h3">Terrain de jeu</ConformeoText>
               <Divider />
               <Toggle
-                label="Offline"
+                label="Hors ligne"
                 value={state.offline}
                 onChange={(v) => setState((s) => ({ ...s, offline: v }))}
               />
               <Toggle
-                label={`Pending ops: ${state.pendingOps}`}
+                label={`Ops en attente : ${state.pendingOps}`}
                 value={state.pendingOps > 0}
                 onChange={(v) => setState((s) => ({ ...s, pendingOps: v ? 5 : 0 }))}
               />
               <Toggle
-                label={`Conflicts: ${state.conflicts}`}
+                label={`Conflits : ${state.conflicts}`}
                 value={state.conflicts > 0}
                 onChange={(v) => setState((s) => ({ ...s, conflicts: v ? 2 : 0 }))}
               />
@@ -93,15 +93,21 @@ export function UiGalleryScreen() {
               <Divider />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.sm }}>
                 <Badge label="OK" tone="success" />
-                <Badge label="WATCH" tone="warning" />
-                <Badge label="RISK" tone="danger" />
-                <Badge label={`SYNC ${state.pendingOps > 0 ? 'PENDING' : 'OK'}`} tone={state.pendingOps > 0 ? 'info' : 'success'} />
-                <Badge label={`QUOTA ${state.quota}`} tone={quotaTone} />
+                <Badge label="VIGILANCE" tone="warning" />
+                <Badge label="RISQUE" tone="danger" />
+                <Badge
+                  label={`SYNC ${state.pendingOps > 0 ? 'EN ATTENTE' : 'OK'}`}
+                  tone={state.pendingOps > 0 ? 'info' : 'success'}
+                />
+                <Badge
+                  label={`QUOTA ${state.quota === 'CRIT' ? '95%+' : state.quota === 'WARN' ? '80%' : 'OK'}`}
+                  tone={quotaTone}
+                />
               </View>
             </Card>
 
             <Card>
-              <ConformeoText variant="h3">States</ConformeoText>
+              <ConformeoText variant="h3">États</ConformeoText>
               <Divider />
               <SyncStatusPill pending={state.pendingOps} conflicts={state.conflicts} />
               <ErrorState
@@ -120,7 +126,7 @@ export function UiGalleryScreen() {
         }
         right={
           <ScrollView contentContainerStyle={{ padding: t.spacing.lg, gap: t.spacing.md }}>
-            <ConformeoText variant="h2">Surfaces & KPI</ConformeoText>
+            <ConformeoText variant="h2">Surfaces & indicateurs</ConformeoText>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.md }}>
               <KpiCard title="Tâches ouvertes" value="12" tone="info" />
               <KpiCard title="Bloquées" value="2" tone="danger" />
@@ -129,13 +135,13 @@ export function UiGalleryScreen() {
             </View>
 
             <Card>
-              <ConformeoText variant="h3">Buttons</ConformeoText>
+              <ConformeoText variant="h3">Boutons</ConformeoText>
               <Divider />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.sm }}>
                 <Button label="Action principale" variant="primary" onPress={() => {}} />
                 <Button label="Secondaire" variant="secondary" onPress={() => {}} />
                 <Button label="Danger" variant="danger" onPress={() => {}} />
-                <Button label="Ghost" variant="ghost" onPress={() => {}} />
+                <Button label="Transparent" variant="ghost" onPress={() => {}} />
               </View>
             </Card>
           </ScrollView>
@@ -144,4 +150,3 @@ export function UiGalleryScreen() {
     </View>
   );
 }
-

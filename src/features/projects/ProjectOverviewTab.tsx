@@ -123,7 +123,7 @@ export function ProjectOverviewTab({
   return (
     <Screen>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: spacing.lg }} keyboardShouldPersistTaps="handled">
-        <SectionHeader title="Aperçu" subtitle="KPIs, alertes et activité — 100% offline-first." />
+        <SectionHeader title="Aperçu" subtitle="KPIs, alertes et activité — 100% hors ligne d'abord." />
 
         <View style={{ gap: spacing.md }}>
           <Card>
@@ -133,10 +133,10 @@ export function ProjectOverviewTab({
               {health ? (
                 <>
                   <Text variant="caption" style={{ color: colors.slate }}>
-                    Offline: {health.offline ? 'oui' : 'non'}
+                    Hors ligne: {health.offline ? 'oui' : 'non'}
                   </Text>
                   <Text variant="caption" style={{ color: colors.slate }}>
-                    Pending sync: {health.pendingOps}
+                    Synchronisation en attente: {health.pendingOps}
                   </Text>
                   <Text variant="caption" style={{ color: colors.slate }}>
                     Erreurs: {health.conflictCount + health.failedUploads}

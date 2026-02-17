@@ -24,11 +24,16 @@ import { SectionHeader } from '../common/SectionHeader';
 const INVITE_ROLES: OrgMemberRole[] = ['admin', 'manager', 'inspector', 'viewer'];
 
 const ROLE_LABEL: Record<OrgMemberRole, string> = {
-  owner: 'Owner',
-  admin: 'Admin',
-  manager: 'Manager',
+  owner: 'Propriétaire',
+  admin: 'Administrateur',
+  manager: 'Responsable',
   inspector: 'Terrain',
   viewer: 'Lecture'
+};
+
+const MEMBER_STATUS_LABEL: Record<OrganizationMember['status'], string> = {
+  INVITED: 'Invité',
+  ACTIVE: 'Actif'
 };
 
 function getErrorMessage(error: unknown) {
@@ -251,7 +256,7 @@ export function OrgsAdminScreen() {
       await teams.create(teamNameDraft);
       setTeamNameDraft('');
       await refreshTeams();
-      setInfo('Equipe créée.');
+      setInfo('Équipe créée.');
     });
   };
 
@@ -385,10 +390,19 @@ export function OrgsAdminScreen() {
         />
 
         <View style={{ gap: spacing.md }}>
+          {!isAdmin ? (
+            <Card>
+              <Text variant="bodyStrong">Lecture seule</Text>
+              <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
+                Les paramètres et la gestion des membres sont réservés aux administrateurs.
+              </Text>
+            </Card>
+          ) : null}
+
           <Card>
             <Text variant="h2">Organisation</Text>
             <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
-              Cache local en lecture actif. Edition réservée admin/owner.
+              Cache local en lecture actif. Édition réservée admin/propriétaire.
             </Text>
 
             <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
@@ -567,7 +581,7 @@ export function OrgsAdminScreen() {
                   <Card key={`${item.user_id ?? item.email ?? item.invited_at}-${item.role}`}>
                     <Text variant="bodyStrong">{item.email ?? item.user_id ?? 'invitation sans utilisateur'}</Text>
                     <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
-                      Rôle {ROLE_LABEL[item.role]} • Statut {item.status}
+                      Rôle {ROLE_LABEL[item.role]} • Statut {MEMBER_STATUS_LABEL[item.status]}
                     </Text>
 
                     {item.joined_at ? (

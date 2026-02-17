@@ -19,7 +19,7 @@ export function EnterpriseHubScreen({ navigation }: Props) {
   const actions = useMemo(
     () => [
       { key: 'orgs', label: 'Paramètres org', route: 'OrgAdmin' as const },
-      { key: 'company', label: 'Company Hub', route: 'CompanyHub' as const },
+      { key: 'company', label: 'Espace entreprise', route: 'CompanyHub' as const },
       { key: 'offers', label: 'Offres', route: 'Offers' as const },
       { key: 'governance', label: 'Gouvernance', route: 'Governance' as const },
       { key: 'backup', label: 'Sauvegarde', route: 'Backup' as const }

@@ -25,10 +25,10 @@ export function SecurityHubScreen({ navigation }: Props) {
     () => [
       { key: 'search', label: 'Recherche', route: 'Search' as const },
       { key: 'security', label: 'Identité & MFA', route: 'SecuritySettings' as const },
-      { key: 'offline', label: 'Offline / Sync', route: 'Offline' as const },
+      { key: 'offline', label: 'Hors ligne / Synchronisation', route: 'Offline' as const },
       { key: 'conflicts', label: 'Conflits', route: 'Conflicts' as const },
       { key: 'audit', label: 'Audit', route: 'Audit' as const },
-      { key: 'superadmin', label: 'Super Admin', route: 'SuperAdmin' as const }
+      { key: 'superadmin', label: 'Super-admin', route: 'SuperAdmin' as const }
     ],
     []
   );
@@ -37,7 +37,7 @@ export function SecurityHubScreen({ navigation }: Props) {
 
   return (
     <Screen>
-      <SectionHeader title="Sécurité" subtitle="Accès aux outils de sécurité, audit et sync (selon modules activés)." />
+      <SectionHeader title="Sécurité" subtitle="Accès aux outils de sécurité, audit et synchronisation (selon modules activés)." />
 
       <View style={{ gap: spacing.md }}>
         <Card>
@@ -67,7 +67,7 @@ export function SecurityHubScreen({ navigation }: Props) {
             </Text>
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
-              <Button label="UI Gallery" kind="ghost" onPress={() => navigation.navigate('UIGallery')} />
+              <Button label="Galerie UI" kind="ghost" onPress={() => navigation.navigate('UIGallery')} />
             </View>
           </Card>
         ) : null}
