@@ -31,6 +31,7 @@ Cette checklist est obligatoire pour toute PR qui touche l’UI.
 - [ ] Contraste lisible (AA minimum).
 - [ ] 3 tailles de texte max par écran (éviter patchwork).
 - [ ] 3 actions primaires max visibles par écran.
+- [ ] Pas d’étoiles / favoris (feature supprimée) dans l’UI.
 
 ## Performance
 

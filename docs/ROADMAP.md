@@ -15,3 +15,6 @@
 - Feature flags + quotas
 - Multi-device + restore
 - Monitoring + alerting
+
+## Phase 3 — Modules support (option)
+- Facturation (clients/devis/factures/paiements) offline-first

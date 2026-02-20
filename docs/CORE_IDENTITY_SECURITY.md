@@ -60,15 +60,21 @@ Module: `/Users/michelgermanotti/Documents/Conformeo/src/core/identity-security`
 ## Migration SQL
 
 - `/Users/michelgermanotti/Documents/Conformeo/supabase/migrations/20260211183000_core_identity_security.sql`
+- `/Users/michelgermanotti/Documents/Conformeo/supabase/migrations/20260218160000_rbac_org_roles_superadmin_support.sql`
 
 Ajouts:
 
 - `roles`
 - `role_permissions`
+- `user_roles` (assignation d’un rôle RBAC à un membre, 1 rôle / org / user)
 - `sessions_audit`
 - extension `profiles` (`org_id`, `phone`, `role`, `updated_at`)
 - policies RLS dédiées
-- helper SQL `is_admin_mfa_required(target_org uuid)`
+- helpers SQL :
+  - `is_admin_mfa_required(target_org uuid)`
+  - `get_effective_role_id(org_id, user_id?)`
+  - `permission_matches(required, granted)`
+  - `has_permission(org_id, permission)`
 
 ## Scénarios de test manuel
 
@@ -93,3 +99,8 @@ Ajouts:
 - Modifier `role_permissions` en base
 - Appeler `refreshAuthorization`
 - Attendu: permissions mises à jour immédiatement
+
+6. Rôle custom (RBAC v2)
+- En tant qu’admin org: créer un rôle custom via “Mon entreprise → Rôles & accès (RBAC)”
+- Assigner le rôle à un membre (table `user_roles`)
+- Attendu: `rbac.listPermissions()` renvoie la liste du rôle assigné (sinon fallback sur rôle système via `org_members.role`)

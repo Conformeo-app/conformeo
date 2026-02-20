@@ -6,6 +6,7 @@ import { Task, tasks } from '../../data/tasks';
 import { useSyncStatus } from '../../data/sync/useSyncStatus';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
+import { ReleaseBadge } from '../../ui/components/ReleaseBadge';
 import { Text } from '../../ui/components/Text';
 import { Screen } from '../../ui/layout/Screen';
 import { useTheme } from '../../ui/theme/ThemeProvider';
@@ -73,12 +74,14 @@ export function EquipmentScreen() {
     [colors, radii.md, spacing.md, spacing.sm]
   );
 
-  const refreshList = useCallback(async () => {
+  const refreshList = useCallback(async (opts?: { page?: number }) => {
     if (!activeOrgId) {
       setItems([]);
       setSelected(null);
       return;
     }
+
+    const pageIndex = Math.max(0, opts?.page ?? page);
 
     setLoadingList(true);
     setError(null);
@@ -89,7 +92,7 @@ export function EquipmentScreen() {
         status: filterStatus,
         q: filterQ,
         limit: PAGE_SIZE,
-        offset: page * PAGE_SIZE
+        offset: pageIndex * PAGE_SIZE
       });
       setItems(rows);
 
@@ -167,16 +170,25 @@ export function EquipmentScreen() {
       return;
     }
 
+    const name = quickName.trim();
+    const type = quickType.trim();
+    const location = quickLocation.trim();
+
+    if (name.length < 2 || type.length < 2) {
+      setError('Nom et type requis (min 2 caractères).');
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
 
     try {
       const record = await equipment.create({
         org_id: activeOrgId,
-        name: quickName,
-        type: quickType,
+        name,
+        type,
         status: quickStatus,
-        location: quickLocation || undefined
+        location: location.length > 0 ? location : undefined
       });
 
       setQuickName('');
@@ -185,7 +197,7 @@ export function EquipmentScreen() {
       setQuickStatus('AVAILABLE');
       setPage(0);
 
-      await refreshList();
+      await refreshList({ page: 0 });
       await refreshDetail(record.id);
     } catch (createError) {
       const message = createError instanceof Error ? createError.message : 'Création impossible.';
@@ -300,15 +312,26 @@ export function EquipmentScreen() {
     <Screen>
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: spacing.lg }}
+        contentContainerStyle={{ paddingBottom: spacing.xl, flexGrow: 1 }}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        showsVerticalScrollIndicator={false}
       >
         <SectionHeader
-          title="Équipements"
+          title="Parc matériel"
           subtitle="Gestion offline-first des équipements, mouvements et liaisons tâches."
+          right={<ReleaseBadge state="ALPHA" />}
         />
 
         <View style={{ gap: spacing.md }}>
+          {error ? (
+            <Card>
+              <Text variant="caption" style={{ color: colors.rose }}>
+                {error}
+              </Text>
+            </Card>
+          ) : null}
+
           <Card>
             <Text variant="h2">Création rapide</Text>
 
@@ -361,7 +384,11 @@ export function EquipmentScreen() {
             </View>
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
-              <Button label={submitting ? 'Création...' : 'Créer équipement'} onPress={() => void createEquipment()} />
+              <Button
+                label={submitting ? 'Création...' : 'Créer équipement'}
+                onPress={() => void createEquipment()}
+                disabled={submitting || quickName.trim().length < 2 || quickType.trim().length < 2}
+              />
               <Text variant="caption" style={{ color: colors.slate, alignSelf: 'center' }}>
                 queue sync {syncStatus.queueDepth}
               </Text>
@@ -607,13 +634,6 @@ export function EquipmentScreen() {
               </Card>
             ) : null}
 
-            {error ? (
-              <Card>
-                <Text variant="caption" style={{ color: colors.rose }}>
-                  {error}
-                </Text>
-              </Card>
-            ) : null}
           </View>
         </View>
       </ScrollView>

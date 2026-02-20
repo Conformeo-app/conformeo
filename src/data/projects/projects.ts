@@ -3,6 +3,7 @@ import { assertProjectWritable } from '../control-mode/readOnly';
 import { dashboard } from '../dashboard';
 import { offlineDB } from '../offline/outbox';
 import { conflicts } from '../sync/conflicts';
+import { getSupabaseClient } from '../../core/supabase/client';
 import type {
   Project,
   ProjectCreateInput,
@@ -43,6 +44,14 @@ type ProjectRow = {
   updated_at: string;
 };
 
+type RemoteProjectRow = {
+  id: string;
+  org_id: string;
+  name: string | null;
+  status: string | null;
+  created_at: string | null;
+};
+
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let setupPromise: Promise<void> | null = null;
 
@@ -54,6 +63,29 @@ function nowIso() {
 
 function normalizeText(value: string | undefined | null) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function ensureRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function toOptionalString(value: unknown) {
+  if (typeof value !== 'string') return undefined;
+  const cleaned = value.trim();
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+function toOptionalNumber(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 }
 
 function optionalText(value: string | null | undefined) {
@@ -172,6 +204,33 @@ function ensureStatusManual(value: string | undefined | null): ProjectStatusManu
   return 'ACTIVE';
 }
 
+function mapRemoteStatusManual(value: unknown): ProjectStatusManual {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (raw === 'archived' || raw === 'archive' || raw === 'archivé') return 'ARCHIVED';
+  if (raw === 'cancelled' || raw === 'deleted' || raw === 'inactive') return 'ARCHIVED';
+  if (raw === 'active' || raw === 'actif') return 'ACTIVE';
+  // Default
+  return 'ACTIVE';
+}
+
+function mapRemoteProjectRow(input: RemoteProjectRow, fallbackOrgId: string, fallbackActorId: string): Project | null {
+  const id = normalizeText(input.id);
+  if (!id) return null;
+  const orgId = normalizeText(input.org_id) || fallbackOrgId;
+  const createdAt = toOptionalString(input.created_at) ?? nowIso();
+  const name = normalizeText(input.name ?? id) || id;
+
+  return {
+    id,
+    org_id: orgId,
+    name,
+    status_manual: mapRemoteStatusManual(input.status),
+    created_by: fallbackActorId,
+    created_at: createdAt,
+    updated_at: createdAt
+  };
+}
+
 function ensureName(value: string) {
   const cleaned = normalizeText(value);
   if (cleaned.length < 2) {
@@ -194,6 +253,37 @@ async function getRowById(id: string) {
   );
 
   return row ?? null;
+}
+
+async function countProjectsByOrg(orgId: string): Promise<number> {
+  await ensureSetup();
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ count: number }>(
+    `
+      SELECT COUNT(*) AS count
+      FROM ${PROJECTS_TABLE}
+      WHERE org_id = ?
+    `,
+    orgId
+  );
+
+  return Number(row?.count ?? 0) || 0;
+}
+
+async function countActiveProjectsByOrg(orgId: string): Promise<number> {
+  await ensureSetup();
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ count: number }>(
+    `
+      SELECT COUNT(*) AS count
+      FROM ${PROJECTS_TABLE}
+      WHERE org_id = ?
+        AND status_manual = 'ACTIVE'
+    `,
+    orgId
+  );
+
+  return Number(row?.count ?? 0) || 0;
 }
 
 async function saveProject(project: Project) {
@@ -617,6 +707,234 @@ export const projects = {
 
   setOrg(orgId: string | null) {
     contextOrgId = normalizeText(orgId) || null;
+  },
+
+  async countByOrg(orgId: string) {
+    const resolved = normalizeText(orgId);
+    if (!resolved) {
+      return 0;
+    }
+    return countProjectsByOrg(resolved);
+  },
+
+  async debugRemoteCount(orgId: string): Promise<{ count: number | null; error: string | null }> {
+    const resolvedOrgId = normalizeText(orgId);
+    if (!resolvedOrgId) {
+      return { count: null, error: 'org_id est requis.' };
+    }
+
+    const client = getSupabaseClient();
+    if (!client) {
+      return { count: null, error: 'Supabase non configuré.' };
+    }
+
+    const { count, error } = await client
+      .from('projects')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', resolvedOrgId);
+
+    return {
+      count: typeof count === 'number' ? count : null,
+      error: error?.message ?? null
+    };
+  },
+
+  async syncFromRemote(input: {
+    org_id: string;
+    actor_id: string;
+    limit?: number;
+  }): Promise<{ imported: number; remoteCount: number | null; error: string | null }> {
+    const orgId = normalizeText(input.org_id);
+    const actorId = normalizeText(input.actor_id);
+    const limit = clampLimit(input.limit);
+
+    if (!orgId || !actorId) {
+      return { imported: 0, remoteCount: null, error: 'org_id et actor_id sont requis.' };
+    }
+
+    const client = getSupabaseClient();
+    if (!client) {
+      return { imported: 0, remoteCount: null, error: 'Supabase non configuré.' };
+    }
+
+    const { data, error, count } = await client
+      .from('projects')
+      .select('id,org_id,name,status,created_at', { count: 'exact' })
+      .eq('org_id', orgId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      return {
+        imported: 0,
+        remoteCount: typeof count === 'number' ? count : null,
+        error: error.message
+      };
+    }
+
+    const remoteRows = (data ?? []) as RemoteProjectRow[];
+    let imported = 0;
+
+    for (const row of remoteRows) {
+      const project = mapRemoteProjectRow(row, orgId, actorId);
+      if (!project) continue;
+      const exists = await getRowById(project.id);
+      if (exists) continue;
+      await saveProject(project);
+      imported += 1;
+    }
+
+    return {
+      imported,
+      remoteCount: typeof count === 'number' ? count : remoteRows.length,
+      error: null
+    };
+  },
+
+  /**
+   * Seed local projects from Supabase when the local projects table is empty.
+   *
+   * Source priority:
+   * 1) public.sync_shadow (entity='projects') — preferred, stores full offline-first payloads.
+   * 2) public.projects — fallback for legacy setups.
+   *
+   * Safety: only inserts missing projects, never overwrites local rows.
+   */
+  async bootstrapFromRemoteIfEmpty(input: { org_id: string; actor_id: string }) {
+    const orgId = normalizeText(input.org_id);
+    const actorId = normalizeText(input.actor_id);
+
+    if (!orgId || !actorId) {
+      return 0;
+    }
+
+    const localCount = await countActiveProjectsByOrg(orgId);
+    if (localCount > 0) {
+      return 0;
+    }
+
+    const client = getSupabaseClient();
+    if (!client) {
+      return 0;
+    }
+
+    type ShadowRow = {
+      entity_id: string;
+      payload: unknown;
+      deleted: boolean;
+      created_at: string | null;
+      updated_at: string | null;
+    };
+
+    let imported = 0;
+
+    const importFromPayload = async (
+      id: string,
+      payload: Record<string, unknown>,
+      timestamps?: { created_at?: string; updated_at?: string }
+    ) => {
+      const existing = await getRowById(id);
+      if (existing) return;
+
+      const createdAt = toOptionalString(payload.created_at) ?? toOptionalString(timestamps?.created_at) ?? nowIso();
+      const updatedAt = toOptionalString(payload.updated_at) ?? toOptionalString(timestamps?.updated_at) ?? createdAt;
+
+      const project: Project = {
+        id,
+        org_id: orgId,
+        name: normalizeText(typeof payload.name === 'string' ? payload.name : id) || id,
+        address: optionalText(typeof payload.address === 'string' ? payload.address : undefined),
+        geo_lat: toOptionalNumber(payload.geo_lat),
+        geo_lng: toOptionalNumber(payload.geo_lng),
+        start_date: optionalText(typeof payload.start_date === 'string' ? payload.start_date : undefined),
+        end_date: optionalText(typeof payload.end_date === 'string' ? payload.end_date : undefined),
+        status_manual: mapRemoteStatusManual(payload.status_manual ?? payload.status),
+        team_id: optionalText(typeof payload.team_id === 'string' ? payload.team_id : undefined),
+        created_by: normalizeText(typeof payload.created_by === 'string' ? payload.created_by : actorId) || actorId,
+        created_at: createdAt,
+        updated_at: updatedAt
+      };
+
+      await saveProject(project);
+      imported += 1;
+    };
+
+    try {
+      const { data: shadowRows, error: shadowError } = await client
+        .from('sync_shadow')
+        .select('entity_id,payload,deleted,created_at,updated_at')
+        .eq('org_id', orgId)
+        .eq('entity', 'projects')
+        .order('updated_at', { ascending: false })
+        .limit(250);
+
+      if (shadowError && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.warn('[projects] sync_shadow read failed:', shadowError.message);
+      }
+
+      const rows = (shadowRows ?? []) as ShadowRow[];
+
+      for (const row of rows) {
+        if (!row || row.deleted) continue;
+        const id = normalizeText(row.entity_id);
+        if (!id) continue;
+        const payload = ensureRecord(row.payload);
+        await importFromPayload(id, payload, { created_at: row.created_at ?? undefined, updated_at: row.updated_at ?? undefined });
+      }
+    } catch (error) {
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.warn('[projects] bootstrapFromRemoteIfEmpty sync_shadow threw:', error);
+      }
+    }
+
+    if (imported > 0) {
+      return imported;
+    }
+
+    // Fallback: legacy public.projects.
+    try {
+      const { data: remoteProjects, error: remoteError } = await client
+        .from('projects')
+        .select('id,org_id,name,status,created_at')
+        .eq('org_id', orgId)
+        .limit(200);
+
+      if (remoteError) {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn('[projects] public.projects read failed:', remoteError.message);
+        }
+        return 0;
+      }
+
+      const remoteRows = (remoteProjects ?? []) as RemoteProjectRow[];
+      for (const row of remoteRows) {
+        const project = mapRemoteProjectRow(row, orgId, actorId);
+        if (!project) continue;
+        await importFromPayload(
+          project.id,
+          {
+            id: project.id,
+            org_id: project.org_id,
+            name: project.name,
+            status: row.status ?? undefined,
+            created_at: project.created_at,
+            updated_at: project.updated_at,
+            created_by: project.created_by
+          },
+          { created_at: project.created_at, updated_at: project.updated_at }
+        );
+      }
+    } catch (error) {
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.warn('[projects] bootstrapFromRemoteIfEmpty public.projects threw:', error);
+      }
+    }
+
+    return imported;
   },
 
   async bootstrapFromDerivedProjects(input: { org_id: string; created_by: string }) {

@@ -1,12 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
-import { overview, type ActivityEvent, type OverviewAlert, type OverviewHealth, type OverviewKpis } from '../../data/projects';
+import {
+  geocodeProjectAddress,
+  overview,
+  projects,
+  type ActivityEvent,
+  type OverviewAlert,
+  type OverviewHealth,
+  type OverviewKpis,
+  type Project
+} from '../../data/projects';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
 import { Text } from '../../ui/components/Text';
 import { Screen } from '../../ui/layout/Screen';
 import { useTheme } from '../../ui/theme/ThemeProvider';
 import { SectionHeader } from '../common/SectionHeader';
+import { ProjectMapCard } from './ProjectMapCard';
 
 function formatDate(iso?: string) {
   if (!iso) return '-';
@@ -46,24 +56,28 @@ export function ProjectOverviewTab({
   const [health, setHealth] = useState<OverviewHealth | null>(null);
   const [alerts, setAlerts] = useState<OverviewAlert[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
+  const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(false);
+  const [geoBusy, setGeoBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [nextKpis, nextHealth, nextAlerts, nextActivity] = await Promise.all([
+      const [nextKpis, nextHealth, nextAlerts, nextActivity, nextProject] = await Promise.all([
         overview.getKpis(projectId),
         overview.getHealth(projectId),
         overview.getAlerts(projectId),
-        overview.getActivity(projectId, 10)
+        overview.getActivity(projectId, 10),
+        projects.getById(projectId)
       ]);
 
       setKpis(nextKpis);
       setHealth(nextHealth);
       setAlerts(nextAlerts);
       setActivity(nextActivity);
+      setProject(nextProject);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Impossible de charger la synthèse chantier.';
       setError(message);
@@ -75,6 +89,45 @@ export function ProjectOverviewTab({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const defineLocation = useCallback(async () => {
+    if (!project) {
+      return;
+    }
+
+    if (health?.offline) {
+      setError("Mode hors ligne : impossible de définir la localisation.");
+      return;
+    }
+
+    const address = project.address?.trim() ?? '';
+    if (address.length < 4) {
+      setError("Adresse manquante : ajoutez une adresse au chantier avant de définir la localisation.");
+      return;
+    }
+
+    setGeoBusy(true);
+    setError(null);
+    try {
+      const result = await geocodeProjectAddress(address);
+      if (!result) {
+        throw new Error('Adresse introuvable.');
+      }
+
+      await projects.update(project.id, {
+        geo_lat: result.lat,
+        geo_lng: result.lng
+      });
+
+      const updated = await projects.getById(project.id);
+      setProject(updated);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Géocodage impossible.';
+      setError(message);
+    } finally {
+      setGeoBusy(false);
+    }
+  }, [health?.offline, project]);
 
   const cards = useMemo(() => {
     const openTasks = kpis?.openTasks ?? 0;
@@ -175,6 +228,14 @@ export function ProjectOverviewTab({
               </Pressable>
             ))}
           </View>
+
+          <ProjectMapCard
+            project={project}
+            isOffline={health?.offline ?? false}
+            busy={loading || geoBusy}
+            onDefineLocation={defineLocation}
+            onOpenPlans={onOpenTab ? () => onOpenTab('Plans') : undefined}
+          />
 
           <Card>
             <Text variant="h2">Alertes</Text>

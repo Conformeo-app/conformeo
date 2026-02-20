@@ -5,7 +5,6 @@ import { ExportType, exportsDoe } from '../exports';
 import { media } from '../media';
 import { TaskPriority, TaskStatus, tasks } from '../tasks';
 import {
-  FavoriteRecord,
   QuickAction,
   QuickActionKey,
   RecentRecord,
@@ -21,7 +20,6 @@ import {
 
 const DB_NAME = 'conformeo.db';
 
-const FAVORITES_TABLE = 'user_favorites';
 const RECENTS_TABLE = 'user_recents';
 const TEMPLATES_TABLE = 'templates';
 
@@ -34,7 +32,15 @@ const DEFAULT_RECENTS_LIMIT = 20;
 const MAX_RECENTS_LIMIT = 100;
 const DEFAULT_PROJECT_ID = 'chantier-conformeo-demo';
 
-const ENTITY_VALUES: UxEntity[] = ['PROJECT', 'TASK', 'DOCUMENT', 'MEDIA', 'EXPORT', 'CHECKLIST', 'TEMPLATE'];
+const ENTITY_VALUES: UxEntity[] = [
+  'PROJECT',
+  'TASK',
+  'DOCUMENT',
+  'MEDIA',
+  'EXPORT',
+  'CHECKLIST',
+  'TEMPLATE'
+];
 const TEMPLATE_TYPES: TemplateType[] = ['TASK', 'CHECKLIST', 'EXPORT'];
 const TASK_STATUSES: TaskStatus[] = ['TODO', 'DOING', 'DONE', 'BLOCKED'];
 const TASK_PRIORITIES: TaskPriority[] = ['LOW', 'MEDIUM', 'HIGH'];
@@ -92,14 +98,6 @@ const QUICK_ACTIONS_BY_ROLE: Record<AppRole, QuickActionKey[]> = {
   ADMIN: ['NEW_TASK', 'ADD_PROOF', 'GENERATE_REPORT', 'GENERATE_CONTROL_PACK', 'CREATE_CHECKLIST'],
   MANAGER: ['NEW_TASK', 'ADD_PROOF', 'GENERATE_REPORT', 'GENERATE_CONTROL_PACK', 'CREATE_CHECKLIST'],
   FIELD: ['NEW_TASK', 'ADD_PROOF', 'GENERATE_REPORT', 'CREATE_CHECKLIST']
-};
-
-type FavoriteRow = {
-  user_id: string;
-  org_id: string;
-  entity: UxEntity;
-  entity_id: string;
-  created_at: string;
 };
 
 type RecentRow = {
@@ -297,16 +295,6 @@ function requireContext() {
   } satisfies UxContext;
 }
 
-function mapFavoriteRow(row: FavoriteRow): FavoriteRecord {
-  return {
-    user_id: row.user_id,
-    org_id: row.org_id,
-    entity: row.entity,
-    entity_id: row.entity_id,
-    created_at: row.created_at
-  };
-}
-
 function mapRecentRow(row: RecentRow): RecentRecord {
   return {
     user_id: row.user_id,
@@ -358,18 +346,6 @@ async function setupSchema() {
 
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
-
-    CREATE TABLE IF NOT EXISTS ${FAVORITES_TABLE} (
-      user_id TEXT NOT NULL,
-      org_id TEXT NOT NULL,
-      entity TEXT NOT NULL CHECK (entity IN ('PROJECT', 'TASK', 'DOCUMENT', 'MEDIA', 'EXPORT', 'CHECKLIST', 'TEMPLATE')),
-      entity_id TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      PRIMARY KEY (user_id, org_id, entity, entity_id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_user_favorites_org_created
-      ON ${FAVORITES_TABLE}(org_id, user_id, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS ${RECENTS_TABLE} (
       user_id TEXT NOT NULL,
@@ -656,88 +632,6 @@ export const ux: UxApi = {
       .map((key) => QUICK_ACTION_CATALOG[key])
       .filter((item): item is QuickAction => Boolean(item))
       .sort((left, right) => left.order - right.order);
-  },
-
-  async addFavorite(entity: UxEntity, id: string) {
-    await ensureSetup();
-    const context = requireContext();
-
-    const safeEntity = ensureEntity(entity);
-    const entityId = normalizeText(id);
-    if (entityId.length === 0) {
-      throw new Error('entity_id requis.');
-    }
-
-    const createdAt = nowIso();
-
-    const db = await getDb();
-    await db.runAsync(
-      `
-        INSERT OR REPLACE INTO ${FAVORITES_TABLE}
-        (user_id, org_id, entity, entity_id, created_at)
-        VALUES (?, ?, ?, ?, ?)
-      `,
-      context.user_id,
-      context.org_id,
-      safeEntity,
-      entityId,
-      createdAt
-    );
-
-    return {
-      user_id: context.user_id,
-      org_id: context.org_id,
-      entity: safeEntity,
-      entity_id: entityId,
-      created_at: createdAt
-    };
-  },
-
-  async removeFavorite(entity: UxEntity, id: string) {
-    await ensureSetup();
-    const context = requireContext();
-
-    const safeEntity = ensureEntity(entity);
-    const entityId = normalizeText(id);
-    if (entityId.length === 0) {
-      return;
-    }
-
-    const db = await getDb();
-    await db.runAsync(
-      `
-        DELETE FROM ${FAVORITES_TABLE}
-        WHERE user_id = ?
-          AND org_id = ?
-          AND entity = ?
-          AND entity_id = ?
-      `,
-      context.user_id,
-      context.org_id,
-      safeEntity,
-      entityId
-    );
-  },
-
-  async listFavorites() {
-    await ensureSetup();
-    const context = requireContext();
-    const db = await getDb();
-
-    const rows = await db.getAllAsync<FavoriteRow>(
-      `
-        SELECT user_id, org_id, entity, entity_id, created_at
-        FROM ${FAVORITES_TABLE}
-        WHERE user_id = ?
-          AND org_id = ?
-        ORDER BY created_at DESC
-        LIMIT 200
-      `,
-      context.user_id,
-      context.org_id
-    );
-
-    return rows.map(mapFavoriteRow);
   },
 
   async trackRecent(entity: UxEntity, id: string) {

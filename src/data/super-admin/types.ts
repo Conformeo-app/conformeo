@@ -3,6 +3,7 @@ export type AdminSelf = {
   is_super_admin: boolean;
   aal: string | null;
   mfa_verified: boolean;
+  permissions: string[];
 };
 
 export type AdminOrg = {
@@ -37,6 +38,16 @@ export type SupportSession = {
   expires_at: string;
   ended_at?: string | null;
   created_at: string;
+};
+
+export type SuperAdminPermissions = {
+  permissions: string[];
+};
+
+export type ImpersonationStartResult = {
+  session: SupportSession;
+  access_token: string;
+  expires_at: string;
 };
 
 export type DeleteOrgResult = {

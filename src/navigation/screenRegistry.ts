@@ -6,6 +6,10 @@ export type ScreenKey =
   | 'TEAM'
   | 'SECURITY_HUB'
   | 'ENTERPRISE_HUB'
+  | 'BILLING_HOME'
+  | 'BILLING_CLIENTS'
+  | 'BILLING_QUOTES'
+  | 'BILLING_INVOICES'
   | 'ACCOUNT'
   | 'ENTERPRISE_ORGS_ADMIN'
   | 'MODULE_DISABLED';
@@ -20,4 +24,3 @@ export function assertScreenKey(component: unknown, expected: ScreenKey, where: 
     throw new Error(`[nav] Wiring invalide: ${where} doit rendre screenKey=${expected}. Reçu: ${String(actual)}`);
   }
 }
-

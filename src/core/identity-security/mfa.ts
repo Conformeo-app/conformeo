@@ -21,12 +21,7 @@ async function requireAdminRole() {
   }
 }
 
-async function resolveFactorId() {
-  const pendingFactorId = await getSecureValue(PENDING_TOTP_FACTOR_KEY);
-  if (pendingFactorId) {
-    return pendingFactorId;
-  }
-
+async function listTotpFactors() {
   const client = requireSupabaseClient();
   const { data, error } = await client.auth.mfa.listFactors();
   if (error) {
@@ -34,7 +29,17 @@ async function resolveFactorId() {
   }
 
   const listData = data as unknown as ListFactorsData;
-  const preferred = listData.totp.find((factor) => factor.status === 'unverified') ?? listData.totp[0];
+  return listData.totp ?? [];
+}
+
+async function resolveFactorId() {
+  const pendingFactorId = await getSecureValue(PENDING_TOTP_FACTOR_KEY);
+  if (pendingFactorId) {
+    return pendingFactorId;
+  }
+
+  const factors = await listTotpFactors();
+  const preferred = factors.find((factor) => factor.status === 'unverified') ?? factors[0];
 
   if (!preferred) {
     throw new Error('Aucun facteur TOTP disponible.');
@@ -45,15 +50,14 @@ async function resolveFactorId() {
 
 export const mfa = {
   async hasVerifiedTotp(): Promise<boolean> {
-    const client = requireSupabaseClient();
-    const { data, error } = await client.auth.mfa.listFactors();
+    const factors = await listTotpFactors();
+    return factors.some((factor) => factor.status === 'verified');
+  },
 
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    const listData = data as unknown as ListFactorsData;
-    return listData.totp.some((factor) => factor.status === 'verified');
+  async hasUnverifiedTotp(): Promise<boolean> {
+    await requireAdminRole();
+    const factors = await listTotpFactors();
+    return factors.some((factor) => factor.status === 'unverified');
   },
 
   async enrollTOTP(): Promise<MfaEnrollment> {
@@ -110,6 +114,23 @@ export const mfa = {
     }
 
     await removeSecureValue(PENDING_TOTP_FACTOR_KEY);
+  },
+
+  async resetUnverifiedTotp(): Promise<number> {
+    await requireAdminRole();
+    const client = requireSupabaseClient();
+    const factors = await listTotpFactors();
+    const unverified = factors.filter((factor) => factor.status === 'unverified');
+
+    for (const factor of unverified) {
+      const { error: unenrollError } = await client.auth.mfa.unenroll({ factorId: factor.id });
+      if (unenrollError) {
+        throw new Error(unenrollError.message);
+      }
+    }
+
+    await removeSecureValue(PENDING_TOTP_FACTOR_KEY);
+    return unverified.length;
   },
 
   async disable(): Promise<void> {

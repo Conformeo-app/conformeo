@@ -1,4 +1,11 @@
-export type SearchEntity = 'TASK' | 'DOCUMENT' | 'MEDIA' | 'EXPORT';
+export type SearchEntity =
+  | 'TASK'
+  | 'DOCUMENT'
+  | 'MEDIA'
+  | 'EXPORT'
+  | 'BILLING_CLIENT'
+  | 'BILLING_QUOTE'
+  | 'BILLING_INVOICE';
 
 export type SearchScope = {
   orgId: string;

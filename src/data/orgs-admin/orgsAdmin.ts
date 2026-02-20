@@ -89,6 +89,15 @@ function nowIso() {
 
 function normalizeRole(value: string | null | undefined): OrgMemberRole {
   const normalized = (value ?? '').toLowerCase();
+
+  if (normalized === 'field' || normalized === 'inspector') {
+    return 'inspector';
+  }
+
+  if (normalized === 'read_only' || normalized === 'readonly') {
+    return 'viewer';
+  }
+
   return ROLE_OPTIONS.includes(normalized as OrgMemberRole) ? (normalized as OrgMemberRole) : 'viewer';
 }
 
@@ -537,14 +546,33 @@ export const members = {
       throw new Error('userId requis.');
     }
 
-    const { error } = await context.client.rpc('set_org_member_role', {
+    const { error } = await context.client.rpc('rbac_assign_role', {
       p_org_id: context.orgId,
-      p_user_id: cleanUserId,
-      p_role: role
+      p_target_user_id: cleanUserId,
+      p_role_key: role
     });
 
     if (error) {
-      throw new Error(error.message);
+      const message = toErrorMessage(error);
+      const normalized = message.toLowerCase();
+
+      if (normalized.includes('self_role_change_forbidden') || normalized.includes('owner cannot change own role')) {
+        throw new Error('Vous ne pouvez pas modifier votre propre rôle.');
+      }
+
+      if (normalized.includes('owner_role_locked') || normalized.includes('owner role is locked')) {
+        throw new Error('Le rôle Propriétaire est verrouillé.');
+      }
+
+      if (normalized.includes('last_admin_forbidden') || normalized.includes('cannot remove last admin')) {
+        throw new Error('Impossible de retirer le dernier administrateur.');
+      }
+
+      if (normalized.includes('function') && normalized.includes('rbac_assign_role') && normalized.includes('does not exist')) {
+        throw new Error("La RPC 'rbac_assign_role' est indisponible. Appliquez la migration RBAC lockdown.");
+      }
+
+      throw new Error(message);
     }
   }
 };

@@ -6,7 +6,7 @@ import { dashboard, type DashboardSummary } from '../../data/dashboard';
 import { projects, type Project, type ProjectIndicators } from '../../data/projects';
 import { ux } from '../../data/ux-accelerators';
 import { useSyncStatus } from '../../data/sync/useSyncStatus';
-import { setCurrentContext } from '../../navigation/contextStore';
+import { setCurrentContext, useAppNavigationContext } from '../../navigation/contextStore';
 import type { ProjectsStackParamList } from '../../navigation/types';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
@@ -16,6 +16,7 @@ import { Text } from '../../ui/components/Text';
 import { Screen } from '../../ui/layout/Screen';
 import { useTheme } from '../../ui/theme/ThemeProvider';
 import { SectionHeader } from '../common/SectionHeader';
+import { ReleaseBadge } from '../../ui/components/ReleaseBadge';
 
 type Props = NativeStackScreenProps<ProjectsStackParamList, 'ProjectsList'>;
 
@@ -185,21 +186,21 @@ export function ProjectsListScreen({ navigation }: Props) {
   const { colors, spacing } = useTheme();
   const { width } = useWindowDimensions();
   const { activeOrgId, user } = useAuth();
+  const navCtx = useAppNavigationContext();
   const { status: syncStatus } = useSyncStatus();
 
   const isWide = width >= MIN_WIDE_LAYOUT_WIDTH;
 
   const [projectsList, setProjectsList] = useState<Project[]>([]);
   const [indicators, setIndicators] = useState<Record<string, ProjectIndicators>>({});
-  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [recentIds, setRecentIds] = useState<string[]>([]);
   const [queryDraft, setQueryDraft] = useState('');
   const [query, setQuery] = useState('');
   const [includeArchived, setIncludeArchived] = useState(false);
-  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [remoteProbeError, setRemoteProbeError] = useState<string | null>(null);
 
   useEffect(() => {
     ux.setContext({
@@ -219,21 +220,68 @@ export function ProjectsListScreen({ navigation }: Props) {
     return () => clearTimeout(handle);
   }, [queryDraft]);
 
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      setCurrentContext({ projectId: undefined });
+    });
+    return unsubscribe;
+  }, [navigation]);
+
   const refresh = useCallback(async () => {
     if (!activeOrgId || !user?.id) {
       setProjectsList([]);
       setIndicators({});
-      setFavoriteIds(new Set());
       setRecentIds([]);
+      setRemoteProbeError(null);
       return;
     }
 
     setLoading(true);
     setError(null);
+    setRemoteProbeError(null);
     try {
-      void (await projects.bootstrapFromDerivedProjects({ org_id: activeOrgId, created_by: user.id }));
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.log('[CHANTIERS] orgId', activeOrgId);
+      }
 
-      const [list, favorites, recents] = await Promise.all([
+      const localCountBefore = await projects.countByOrg(activeOrgId);
+
+      await projects.bootstrapFromDerivedProjects({ org_id: activeOrgId, created_by: user.id });
+
+      const imported = await projects.bootstrapFromRemoteIfEmpty({ org_id: activeOrgId, actor_id: user.id });
+      if (__DEV__ && imported > 0) {
+        // eslint-disable-next-line no-console
+        console.info('[projects] bootstrap remote -> local', { imported, org: activeOrgId });
+      }
+
+      let remoteCount: number | null = null;
+      let remoteErrorMessage: string | null = null;
+      if (__DEV__) {
+        const remoteProbe = await projects.debugRemoteCount(activeOrgId);
+        // eslint-disable-next-line no-console
+        console.log('[CHANTIERS] remote probe', remoteProbe);
+        remoteCount = remoteProbe.count;
+        remoteErrorMessage = remoteProbe.error;
+        if (remoteProbe.error) {
+          setRemoteProbeError(remoteProbe.error);
+        }
+      }
+
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.info('[projects] refresh context', {
+          org: activeOrgId,
+          user: user.id,
+          localCount: localCountBefore,
+          query,
+          includeArchived,
+          remoteCount,
+          remoteError: remoteErrorMessage
+        });
+      }
+
+      let [list, recents] = await Promise.all([
         projects.list({
           org_id: activeOrgId,
           query,
@@ -241,25 +289,50 @@ export function ProjectsListScreen({ navigation }: Props) {
           limit: 200,
           offset: 0
         }),
-        ux.listFavorites(),
         ux.listRecents(30)
       ]);
 
-      const favoriteSet = new Set(
-        favorites.filter((fav) => fav.entity === 'PROJECT').map((fav) => fav.entity_id)
-      );
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.log('[CHANTIERS] data.length', list.length);
+      }
+
+      if (list.length === 0 && !query && !includeArchived) {
+        const remoteSync = await projects.syncFromRemote({
+          org_id: activeOrgId,
+          actor_id: user.id,
+          limit: 200
+        });
+
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log('[CHANTIERS] fallback remote', remoteSync);
+        }
+
+        if (remoteSync.error) {
+          setRemoteProbeError(remoteSync.error);
+        }
+
+        if (remoteSync.imported > 0) {
+          list = await projects.list({
+            org_id: activeOrgId,
+            query,
+            include_archived: includeArchived,
+            limit: 200,
+            offset: 0
+          });
+        }
+      }
 
       const recentProjectIds = recents
         .filter((item) => item.entity === 'PROJECT')
         .map((item) => item.entity_id);
 
-      setFavoriteIds(favoriteSet);
       setRecentIds(recentProjectIds);
 
-      const filteredList = favoritesOnly ? list.filter((item) => favoriteSet.has(item.id)) : list;
-      setProjectsList(filteredList);
+      setProjectsList(list);
 
-      const ids = filteredList.map((item) => item.id);
+      const ids = list.map((item) => item.id);
       const indicatorMap = await projects.getIndicators(activeOrgId, ids);
       setIndicators(indicatorMap);
 
@@ -274,11 +347,19 @@ export function ProjectsListScreen({ navigation }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [activeOrgId, favoritesOnly, includeArchived, query, user?.id]);
+  }, [activeOrgId, includeArchived, query, user?.id]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    // Highlight the last opened project (no auto-navigation).
+    if (!navCtx.projectId) return;
+    const exists = projectsList.some((p) => p.id === navCtx.projectId);
+    if (!exists) return;
+    setSelectedProjectId((current) => (current === navCtx.projectId ? current : navCtx.projectId ?? null));
+  }, [navCtx.projectId, projectsList]);
 
   const sortedProjects = useMemo(() => {
     if (!recentIds.length) {
@@ -322,42 +403,17 @@ export function ProjectsListScreen({ navigation }: Props) {
     [navigation]
   );
 
-  const toggleFavorite = useCallback(
-    async (projectId: string) => {
-      if (!activeOrgId || !user?.id) {
-        return;
-      }
-
-      const alreadyFavorite = favoriteIds.has(projectId);
-
-      try {
-        if (alreadyFavorite) {
-          await ux.removeFavorite('PROJECT', projectId);
-        } else {
-          await ux.addFavorite('PROJECT', projectId);
-        }
-
-        const nextFavorites = await ux.listFavorites();
-        const nextSet = new Set(nextFavorites.filter((fav) => fav.entity === 'PROJECT').map((fav) => fav.entity_id));
-        setFavoriteIds(nextSet);
-
-        if (favoritesOnly) {
-          setProjectsList((current) => current.filter((item) => nextSet.has(item.id)));
-        }
-      } catch (favError) {
-        setError(toErrorMessage(favError));
-      }
-    },
-    [activeOrgId, favoriteIds, favoritesOnly, user?.id]
-  );
-
   return (
     <Screen>
       <View style={{ gap: spacing.md, flex: 1, minHeight: 0 }}>
-        <SectionHeader title="Chantiers" subtitle="Sélectionne un chantier pour accéder aux onglets." />
+        <SectionHeader
+          title="Mes chantiers"
+          subtitle="Sélectionne un chantier pour accéder aux onglets."
+          right={<ReleaseBadge state="BETA" />}
+        />
 
         <View style={{ flex: 1, minHeight: 0, flexDirection: isWide ? 'row' : 'column', gap: spacing.md }}>
-          <View style={{ width: isWide ? 380 : undefined, minHeight: 0 }}>
+          <View style={{ width: isWide ? 380 : undefined, flex: isWide ? undefined : 1, minHeight: 0 }}>
             <Card>
               <Text variant="bodyStrong">Filtrer</Text>
               <View style={{ marginTop: spacing.sm }}>
@@ -378,12 +434,6 @@ export function ProjectsListScreen({ navigation }: Props) {
                   onPress={() => setIncludeArchived((current) => !current)}
                   disabled={loading}
                 />
-                <Button
-                  label={favoritesOnly ? 'Tous' : 'Favoris'}
-                  kind="ghost"
-                  onPress={() => setFavoritesOnly((current) => !current)}
-                  disabled={loading}
-                />
               </View>
 
               {syncStatus.phase === 'offline' ? (
@@ -397,16 +447,23 @@ export function ProjectsListScreen({ navigation }: Props) {
                   {error}
                 </Text>
               ) : null}
+
+              {remoteProbeError ? (
+                <Text variant="caption" style={{ color: colors.amber, marginTop: spacing.sm }}>
+                  Synchronisation distante indisponible: {remoteProbeError}
+                </Text>
+              ) : null}
             </Card>
 
             <FlatList
+              style={{ flex: 1, minHeight: 0 }}
               data={sortedProjects}
               keyExtractor={(item) => item.id}
-              contentContainerStyle={{ paddingVertical: spacing.md, gap: spacing.sm }}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingVertical: spacing.md, gap: spacing.sm, flexGrow: 1 }}
               renderItem={({ item }) => {
                 const isSelected = item.id === selectedProjectId;
                 const indicator = indicators[item.id] ?? null;
-                const isFavorite = favoriteIds.has(item.id);
 
                 return (
                   <Pressable
@@ -448,12 +505,6 @@ export function ProjectsListScreen({ navigation }: Props) {
                           marginTop: spacing.sm
                         }}
                       >
-                        <Pressable onPress={() => void toggleFavorite(item.id)} hitSlop={10}>
-                          <Text variant="caption" style={{ color: isFavorite ? colors.teal : colors.slate }}>
-                            {isFavorite ? 'Favori' : 'Ajouter favori'}
-                          </Text>
-                        </Pressable>
-
                         {recentIds.includes(item.id) ? (
                           <Text variant="caption" style={{ color: colors.slate }}>
                             Récent
@@ -467,8 +518,25 @@ export function ProjectsListScreen({ navigation }: Props) {
               ListEmptyComponent={
                 <Card>
                   <Text variant="body" style={{ color: colors.slate }}>
-                    Aucun chantier. Crée un chantier, ou crée des tâches/preuves offline puis rafraîchis.
+                    {loading
+                      ? 'Chargement des chantiers...'
+                      : query.length > 0 || includeArchived
+                        ? 'Aucun chantier ne correspond au filtre.'
+                        : 'Aucun chantier trouvé pour cette organisation.'}
                   </Text>
+                  {remoteProbeError ? (
+                    <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>
+                      Impossible de récupérer les chantiers depuis le serveur (droits / connexion). Détail : {remoteProbeError}
+                    </Text>
+                  ) : null}
+                  <View style={{ marginTop: spacing.sm }}>
+                    <Button label="Créer un chantier" onPress={() => navigation.navigate('ProjectCreate')} />
+                  </View>
+                  {remoteProbeError ? (
+                    <View style={{ marginTop: spacing.sm }}>
+                      <Button label="Réessayer la synchronisation" kind="ghost" onPress={() => void refresh()} />
+                    </View>
+                  ) : null}
                 </Card>
               }
             />

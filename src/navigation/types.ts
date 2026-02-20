@@ -74,6 +74,17 @@ export type EnterpriseStackParamList = {
   EnterpriseHub: undefined;
   OrgAdmin: undefined;
   CompanyHub: undefined;
+  BillingHome: undefined;
+  BillingClients: undefined;
+  BillingClientDetail: { clientId: string };
+  BillingClientEdit: { clientId?: string };
+  BillingQuotes: undefined;
+  BillingQuoteDetail: { quoteId: string };
+  BillingQuoteEdit: { quoteId?: string; clientId?: string };
+  BillingInvoices: undefined;
+  BillingInvoiceDetail: { invoiceId: string };
+  BillingInvoiceEdit: { invoiceId?: string; clientId?: string; quoteId?: string };
+  BillingPaymentCreate: { invoiceId: string };
   Offers: undefined;
   Governance: undefined;
   Backup: undefined;

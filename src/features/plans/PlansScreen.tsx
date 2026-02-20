@@ -33,6 +33,7 @@ import { Text } from '../../ui/components/Text';
 import { Screen } from '../../ui/layout/Screen';
 import { useTheme } from '../../ui/theme/ThemeProvider';
 import { SectionHeader } from '../common/SectionHeader';
+import { PinDetailsPanel, type ResolvedPinLink } from './PinDetailsPanel';
 
 const DEMO_PROJECT_ID = 'chantier-conformeo-demo';
 
@@ -51,13 +52,6 @@ const PRIORITY_FILTERS: Array<{ key: PlanPinPriority | 'ALL'; label: string }> =
 ];
 
 type TaskLinkFilter = 'ALL' | 'WITH_TASK' | 'WITHOUT_TASK';
-
-type ResolvedLink = {
-  link: PlanPinLink;
-  title: string;
-  subtitle?: string;
-  thumbPath?: string;
-};
 
 type ViewerHandle = {
   centerOn: (coords: { x: number; y: number }) => void;
@@ -344,245 +338,6 @@ const PlanViewer = React.forwardRef<ViewerHandle, PlanViewerProps>(function Plan
   return view;
 });
 
-function PinDetailPanel({
-  pin,
-  links,
-  busy,
-  onClose,
-  onUpdate,
-  onDelete,
-  onCreateLinkedTask,
-  onAddProof,
-  onLink,
-  onUnlink
-}: {
-  pin: PlanPin | null;
-  links: ResolvedLink[];
-  busy: boolean;
-  onClose?: () => void;
-  onUpdate: (patch: { label?: string; status?: PlanPinStatus; priority?: PlanPinPriority; comment?: string }) => void;
-  onDelete: () => void;
-  onCreateLinkedTask: () => void;
-  onAddProof: (source: 'capture' | 'import') => void;
-  onLink: (entity: PlanPinLinkEntity, entityId: string) => void;
-  onUnlink: (entity: PlanPinLinkEntity, entityId: string) => void;
-}) {
-  const { colors, spacing, radii } = useTheme();
-  const [labelDraft, setLabelDraft] = useState('');
-  const [commentDraft, setCommentDraft] = useState('');
-  const [linkEntity, setLinkEntity] = useState<PlanPinLinkEntity>('TASK');
-  const [linkEntityId, setLinkEntityId] = useState('');
-
-  useEffect(() => {
-    setLabelDraft(pin?.label ?? '');
-    setCommentDraft(pin?.comment ?? '');
-    setLinkEntity('TASK');
-    setLinkEntityId('');
-  }, [pin?.id]);
-
-  if (!pin) {
-    return (
-      <Card style={{ flex: 1, minHeight: 0 }}>
-        <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-          <Text variant="h2">Point du plan</Text>
-          <Text variant="body" style={{ color: colors.slate, marginTop: spacing.sm }}>
-            Selectionnez un pin pour voir / modifier ses details.
-          </Text>
-        </ScrollView>
-      </Card>
-    );
-  }
-
-  return (
-    <Card style={{ flex: 1, minHeight: 0 }}>
-      <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text variant="h2" numberOfLines={1}>
-              {pin.label || `Point ${pin.id.slice(0, 6)}`}
-            </Text>
-            <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
-              Page {pin.page_number} · {pin.status} · Priorite {priorityLabel(pin.priority)}
-            </Text>
-          </View>
-          {onClose ? <Button label="Fermer" kind="ghost" onPress={onClose} /> : null}
-        </View>
-
-        <TextInput
-          value={labelDraft}
-          onChangeText={setLabelDraft}
-          placeholder="Label"
-          placeholderTextColor={colors.slate}
-          style={{
-            marginTop: spacing.md,
-            borderWidth: 1,
-            borderColor: colors.fog,
-            borderRadius: radii.md,
-            paddingHorizontal: spacing.md,
-            paddingVertical: spacing.sm,
-            backgroundColor: colors.white
-          }}
-        />
-
-        <TextInput
-          value={commentDraft}
-          onChangeText={setCommentDraft}
-          placeholder="Commentaire"
-          placeholderTextColor={colors.slate}
-          multiline
-          style={{
-            marginTop: spacing.sm,
-            borderWidth: 1,
-            borderColor: colors.fog,
-            borderRadius: radii.md,
-            paddingHorizontal: spacing.md,
-            paddingVertical: spacing.sm,
-            backgroundColor: colors.white,
-            minHeight: 88,
-            textAlignVertical: 'top'
-          }}
-        />
-
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
-          <Button label="Enregistrer" onPress={() => onUpdate({ label: labelDraft, comment: commentDraft })} disabled={busy} />
-          <Button label="Supprimer" kind="ghost" onPress={onDelete} disabled={busy} />
-        </View>
-
-        <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.md }}>
-          Statut
-        </Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs }}>
-          {(['OPEN', 'DONE', 'INFO'] as PlanPinStatus[]).map((status) => (
-            <Button
-              key={status}
-              label={status}
-              kind={pin.status === status ? 'primary' : 'ghost'}
-              onPress={() => onUpdate({ status })}
-              disabled={busy}
-            />
-          ))}
-        </View>
-
-        <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.md }}>
-          Priorite
-        </Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs }}>
-          {(['LOW', 'MEDIUM', 'HIGH'] as PlanPinPriority[]).map((priority) => (
-            <Button
-              key={priority}
-              label={priority}
-              kind={pin.priority === priority ? 'primary' : 'ghost'}
-              onPress={() => onUpdate({ priority })}
-              disabled={busy}
-            />
-          ))}
-        </View>
-
-        <Text variant="h2" style={{ marginTop: spacing.lg }}>
-          Actions rapides
-        </Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
-          <Button label="Creer tache liee" onPress={onCreateLinkedTask} disabled={busy} />
-          <Button label="Photo" kind="ghost" onPress={() => onAddProof('capture')} disabled={busy} />
-          <Button label="Importer" kind="ghost" onPress={() => onAddProof('import')} disabled={busy} />
-        </View>
-
-        <Text variant="h2" style={{ marginTop: spacing.lg }}>
-          Liens
-        </Text>
-        {links.length === 0 ? (
-          <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.sm }}>
-            Aucun lien.
-          </Text>
-        ) : (
-          <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
-            {links.slice(0, 30).map((item) => (
-              <View
-                key={item.link.id}
-                style={{
-                  borderWidth: 1,
-                  borderColor: colors.fog,
-                  borderRadius: radii.md,
-                  padding: spacing.md,
-                  backgroundColor: colors.white
-                }}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                  {item.thumbPath ? (
-                    <Image
-                      source={{ uri: item.thumbPath }}
-                      style={{ width: 40, height: 40, borderRadius: radii.sm, backgroundColor: colors.fog }}
-                    />
-                  ) : null}
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text variant="bodyStrong" numberOfLines={1}>
-                      [{item.link.entity}] {item.title}
-                    </Text>
-                    {item.subtitle ? (
-                      <Text variant="caption" style={{ color: colors.slate }} numberOfLines={2}>
-                        {item.subtitle}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <Button
-                    label="Retirer"
-                    kind="ghost"
-                    onPress={() => onUnlink(item.link.entity, item.link.entity_id)}
-                    disabled={busy}
-                  />
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
-        <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.lg }}>
-          Lien manuel (debug/MVP)
-        </Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs }}>
-          {(['TASK', 'MEDIA', 'DOCUMENT'] as PlanPinLinkEntity[]).map((entity) => (
-            <Button
-              key={entity}
-              label={entity}
-              kind={linkEntity === entity ? 'primary' : 'ghost'}
-              onPress={() => setLinkEntity(entity)}
-              disabled={busy}
-            />
-          ))}
-        </View>
-        <TextInput
-          value={linkEntityId}
-          onChangeText={setLinkEntityId}
-          placeholder="entity_id (uuid)"
-          placeholderTextColor={colors.slate}
-          style={{
-            marginTop: spacing.sm,
-            borderWidth: 1,
-            borderColor: colors.fog,
-            borderRadius: radii.md,
-            paddingHorizontal: spacing.md,
-            paddingVertical: spacing.sm,
-            backgroundColor: colors.white
-          }}
-        />
-        <View style={{ marginTop: spacing.sm }}>
-          <Button
-            label="Ajouter le lien"
-            kind="ghost"
-            onPress={() => {
-              const id = normalizeText(linkEntityId);
-              if (!id) return;
-              onLink(linkEntity, id);
-              setLinkEntityId('');
-            }}
-            disabled={busy}
-          />
-        </View>
-      </ScrollView>
-    </Card>
-  );
-}
-
 export function PlansScreen({ projectId }: { projectId?: string } = {}) {
   const { colors, spacing, radii } = useTheme();
   const { width } = useWindowDimensions();
@@ -611,7 +366,7 @@ export function PlansScreen({ projectId }: { projectId?: string } = {}) {
   const [pageInput, setPageInput] = useState('1');
 
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
-  const [selectedPinLinks, setSelectedPinLinks] = useState<ResolvedLink[]>([]);
+  const [selectedPinLinks, setSelectedPinLinks] = useState<ResolvedPinLink[]>([]);
 
   const [addMode, setAddMode] = useState(false);
   const [quickLabel, setQuickLabel] = useState('');
@@ -619,10 +374,15 @@ export function PlansScreen({ projectId }: { projectId?: string } = {}) {
   const [quickPriority, setQuickPriority] = useState<PlanPinPriority>('MEDIUM');
 
   const [detailOpen, setDetailOpen] = useState(false);
+  const [rightPaneWidth, setRightPaneWidth] = useState(0);
 
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const PIN_PANEL_WIDTH = 360;
+  const PIN_PANEL_BOTTOM_HEIGHT = 320;
+  const PIN_PANEL_MIN_VIEWER_WIDTH = 520;
 
   useEffect(() => {
     plans.setContext({
@@ -672,7 +432,7 @@ export function PlansScreen({ projectId }: { projectId?: string } = {}) {
     const links = await plans.listLinks(pinId);
 
     const resolved = await Promise.all(
-      links.map(async (link): Promise<ResolvedLink> => {
+      links.map(async (link): Promise<ResolvedPinLink> => {
         if (link.entity === 'TASK') {
           const task = await tasks.getById(link.entity_id);
           return {
@@ -810,6 +570,13 @@ export function PlansScreen({ projectId }: { projectId?: string } = {}) {
   }, [refreshPins]);
 
   useEffect(() => {
+    // iPad split: panel is always visible in the layout (no modal).
+    if (split) {
+      setDetailOpen(false);
+    }
+  }, [split]);
+
+  useEffect(() => {
     if (!selectedPinId) {
       setSelectedPinLinks([]);
       return;
@@ -830,13 +597,15 @@ export function PlansScreen({ projectId }: { projectId?: string } = {}) {
   const selectPin = useCallback(
     async (pin: PlanPin) => {
       setSelectedPinId(pin.id);
-      setDetailOpen(true);
+      if (!split) {
+        setDetailOpen(true);
+      }
       setCurrentPage(pin.page_number);
       setPageInput(String(pin.page_number));
       viewerRef.current?.centerOn({ x: pin.x, y: pin.y });
       await refreshLinks(pin.id);
     },
-    [refreshLinks]
+    [refreshLinks, split]
   );
 
   const createPinAt = useCallback(
@@ -1406,53 +1175,109 @@ export function PlansScreen({ projectId }: { projectId?: string } = {}) {
     </Card>
   );
 
+  const canRenderSidePanel = split && rightPaneWidth >= PIN_PANEL_WIDTH + PIN_PANEL_MIN_VIEWER_WIDTH + spacing.md;
+
   const rightColumn = (
-    <View style={{ flex: 1, minHeight: 0, gap: spacing.md, position: 'relative' }}>
+    <View style={{ flex: 1, minHeight: 0, gap: spacing.md }}>
       {viewerToolbar}
 
-      <View style={{ flex: 1, minHeight: 0 }}>
-        <PlanViewer
-          ref={viewerRef}
-          asset={activeAsset}
-          pins={pagePins}
-          selectedPinId={selectedPinId}
-          addMode={addMode}
-          onSelectPin={selectPin}
-          onCreatePin={createPinAt}
-          onOpenPdf={openPdf}
-        />
-      </View>
-
       {!split ? (
-        <Modal animationType="slide" visible={detailOpen} onRequestClose={() => setDetailOpen(false)}>
-          <Screen>
-            <PinDetailPanel
-              pin={selectedPin}
-              links={selectedPinLinks}
-              busy={busy}
-              onClose={() => setDetailOpen(false)}
-              onUpdate={updateSelectedPin}
-              onDelete={() => void deleteSelectedPin()}
-              onCreateLinkedTask={() => void createLinkedTask()}
-              onAddProof={(source) => void addProofToPin(source)}
-              onLink={(entity, id) => void addManualLink(entity, id)}
-              onUnlink={(entity, id) => void removeLink(entity, id)}
+        <>
+          <View style={{ flex: 1, minHeight: 0 }}>
+            <PlanViewer
+              ref={viewerRef}
+              asset={activeAsset}
+              pins={pagePins}
+              selectedPinId={selectedPinId}
+              addMode={addMode}
+              onSelectPin={selectPin}
+              onCreatePin={createPinAt}
+              onOpenPdf={openPdf}
             />
-          </Screen>
-        </Modal>
+          </View>
+
+          <Modal animationType="slide" visible={detailOpen} onRequestClose={() => setDetailOpen(false)}>
+            <Screen>
+              <PinDetailsPanel
+                pin={selectedPin}
+                links={selectedPinLinks}
+                busy={busy}
+                onClose={() => setDetailOpen(false)}
+                onUpdate={updateSelectedPin}
+                onDelete={() => void deleteSelectedPin()}
+                onCreateLinkedTask={() => void createLinkedTask()}
+                onAddProof={(source) => void addProofToPin(source)}
+                onLink={(entity, id) => void addManualLink(entity, id)}
+                onUnlink={(entity, id) => void removeLink(entity, id)}
+              />
+            </Screen>
+          </Modal>
+        </>
       ) : (
-        <View style={{ position: 'absolute', top: spacing.md, right: spacing.md, bottom: spacing.md, width: 380 }}>
-          <PinDetailPanel
-            pin={selectedPin}
-            links={selectedPinLinks}
-            busy={busy}
-            onUpdate={updateSelectedPin}
-            onDelete={() => void deleteSelectedPin()}
-            onCreateLinkedTask={() => void createLinkedTask()}
-            onAddProof={(source) => void addProofToPin(source)}
-            onLink={(entity, id) => void addManualLink(entity, id)}
-            onUnlink={(entity, id) => void removeLink(entity, id)}
-          />
+        <View
+          style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}
+          onLayout={(event) => {
+            const nextWidth = Math.floor(event.nativeEvent.layout.width);
+            setRightPaneWidth((prev) => (prev === nextWidth ? prev : nextWidth));
+          }}
+        >
+          {canRenderSidePanel ? (
+            <View style={{ flex: 1, minHeight: 0, flexDirection: 'row', gap: spacing.md }}>
+              <View style={{ flex: 1, minHeight: 0 }}>
+                <PlanViewer
+                  ref={viewerRef}
+                  asset={activeAsset}
+                  pins={pagePins}
+                  selectedPinId={selectedPinId}
+                  addMode={addMode}
+                  onSelectPin={selectPin}
+                  onCreatePin={createPinAt}
+                  onOpenPdf={openPdf}
+                />
+              </View>
+              <View style={{ width: PIN_PANEL_WIDTH, minHeight: 0 }}>
+                <PinDetailsPanel
+                  pin={selectedPin}
+                  links={selectedPinLinks}
+                  busy={busy}
+                  onUpdate={updateSelectedPin}
+                  onDelete={() => void deleteSelectedPin()}
+                  onCreateLinkedTask={() => void createLinkedTask()}
+                  onAddProof={(source) => void addProofToPin(source)}
+                  onLink={(entity, id) => void addManualLink(entity, id)}
+                  onUnlink={(entity, id) => void removeLink(entity, id)}
+                />
+              </View>
+            </View>
+          ) : (
+            <View style={{ flex: 1, minHeight: 0, gap: spacing.md }}>
+              <View style={{ flex: 1, minHeight: 0 }}>
+                <PlanViewer
+                  ref={viewerRef}
+                  asset={activeAsset}
+                  pins={pagePins}
+                  selectedPinId={selectedPinId}
+                  addMode={addMode}
+                  onSelectPin={selectPin}
+                  onCreatePin={createPinAt}
+                  onOpenPdf={openPdf}
+                />
+              </View>
+              <View style={{ height: PIN_PANEL_BOTTOM_HEIGHT, minHeight: 0 }}>
+                <PinDetailsPanel
+                  pin={selectedPin}
+                  links={selectedPinLinks}
+                  busy={busy}
+                  onUpdate={updateSelectedPin}
+                  onDelete={() => void deleteSelectedPin()}
+                  onCreateLinkedTask={() => void createLinkedTask()}
+                  onAddProof={(source) => void addProofToPin(source)}
+                  onLink={(entity, id) => void addManualLink(entity, id)}
+                  onUnlink={(entity, id) => void removeLink(entity, id)}
+                />
+              </View>
+            </View>
+          )}
         </View>
       )}
     </View>

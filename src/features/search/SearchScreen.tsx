@@ -21,20 +21,34 @@ const ORG_SCOPE_KEY = '__ORG__';
 const DEBOUNCE_MS = 220;
 const SUGGESTIONS_LIMIT = 8;
 
-const ENTITY_ORDER: SearchEntity[] = ['TASK', 'DOCUMENT', 'MEDIA', 'EXPORT'];
+const ENTITY_ORDER: SearchEntity[] = [
+  'TASK',
+  'DOCUMENT',
+  'MEDIA',
+  'EXPORT',
+  'BILLING_INVOICE',
+  'BILLING_QUOTE',
+  'BILLING_CLIENT'
+];
 
 const ENTITY_LABELS: Record<SearchEntity, string> = {
   TASK: 'Tâches',
   DOCUMENT: 'Documents',
   MEDIA: 'Preuves',
-  EXPORT: 'Exports'
+  EXPORT: 'Exports',
+  BILLING_CLIENT: 'Clients',
+  BILLING_QUOTE: 'Devis',
+  BILLING_INVOICE: 'Factures'
 };
 
 const ENTITY_HINTS: Record<SearchEntity, string> = {
   TASK: 'Titre, description, tags, statut',
   DOCUMENT: 'Titre, type, statut, tags',
   MEDIA: 'Tag, mime, statut upload',
-  EXPORT: 'Type export, statut, erreurs'
+  EXPORT: 'Type export, statut, erreurs',
+  BILLING_CLIENT: 'Nom, email, téléphone, TVA',
+  BILLING_QUOTE: 'Numéro, client, statut, dates',
+  BILLING_INVOICE: 'Numéro, client, statut, dates'
 };
 
 type HighlightPart = {

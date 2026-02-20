@@ -1,0 +1,10 @@
+[project]
+name = "conformeo"
+
+[guardrails]
+ignore_paths = [
+  "legacy-mobile/**",
+  "docs/**",
+  "dist/**",
+  "node_modules/**"
+]

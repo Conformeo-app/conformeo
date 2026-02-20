@@ -17,6 +17,7 @@
 - Admin orgs & modules
 - Dashboard & search
 - Offline-first + conflits
+- Facturation (clients, devis, factures, paiements)
 - Media pipeline
 - Plans annotables
 - Signature probante

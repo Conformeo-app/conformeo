@@ -7,6 +7,10 @@
 - **Backend** : Supabase (Postgres + RLS) + Edge Functions
 - **Sync** : outbox persistante, deltas, retries, idempotence serveur
 - **CI/CD** : EAS Build + EAS Update (OTA JS uniquement)
+- **Facturation (MVP)** :
+  - Accès UI : sous-module dans **Entreprise** (pas de 9e entrée Drawer).
+  - Numérotation : réservation de **plage** via RPC `reserve_billing_numbers` + état local `billing_numbering_state`.
+  - Fallback offline : numéros `TMP-*` autorisés uniquement en `draft`.
 
 ## Choix en attente
 - **Bundle ID** : à définir (placeholder en attendant)

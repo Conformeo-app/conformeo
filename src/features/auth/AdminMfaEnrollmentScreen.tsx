@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
+import * as Clipboard from 'expo-clipboard';
+import { Linking } from 'react-native';
 import { ActivityIndicator, ScrollView, TextInput, View } from 'react-native';
 import { useAuth } from '../../core/auth';
+import { toErrorMessage } from '../../core/identity-security/utils';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
 import { Text } from '../../ui/components/Text';
 import { Screen } from '../../ui/layout/Screen';
+import { ui } from '../../ui/runtime/ui';
 import { useTheme } from '../../ui/theme/ThemeProvider';
 
 function getErrorMessage(error: unknown) {
@@ -16,7 +20,7 @@ function getErrorMessage(error: unknown) {
 
 export function AdminMfaEnrollmentScreen() {
   const { colors, spacing, radii } = useTheme();
-  const { pendingMfaEnrollment, enrollAdminMfa, verifyAdminMfa, signOut } = useAuth();
+  const { pendingMfaEnrollment, enrollAdminMfa, verifyAdminMfa, resetAdminMfaEnrollment, signOut } = useAuth();
 
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -43,6 +47,30 @@ export function AdminMfaEnrollmentScreen() {
       setInfo('Facteur TOTP cree. Scanne le QR (URI) puis saisis le code.');
     } catch (enrollError) {
       setError(getErrorMessage(enrollError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleReset = async () => {
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+
+    try {
+      const confirmed = await ui.showConfirm({
+        title: 'Réinitialiser MFA',
+        body: "Cette action supprime les facteurs TOTP en attente (non vérifiés) afin de recommencer l'enrôlement."
+      });
+
+      if (!confirmed) {
+        return;
+      }
+
+      const removed = await resetAdminMfaEnrollment();
+      setInfo(removed > 0 ? `MFA réinitialisé (${removed} facteur(s) supprimé(s)).` : 'Aucun facteur en attente à réinitialiser.');
+    } catch (resetError) {
+      setError(toErrorMessage(resetError, 'Échec de la réinitialisation MFA.'));
     } finally {
       setBusy(false);
     }
@@ -91,11 +119,55 @@ export function AdminMfaEnrollmentScreen() {
               <Text selectable variant="caption" style={{ color: colors.slate }}>
                 {pendingMfaEnrollment.secret}
               </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+                <Button
+                  label="Copier le secret"
+                  kind="ghost"
+                  disabled={busy}
+                  onPress={() => {
+                    void (async () => {
+                      await Clipboard.setStringAsync(pendingMfaEnrollment.secret);
+                      ui.showToast('Secret copié.', 'success');
+                    })();
+                  }}
+                />
+              </View>
 
               <Text variant="bodyStrong">URI de provisioning</Text>
               <Text selectable variant="caption" style={{ color: colors.slate }}>
                 {pendingMfaEnrollment.uri}
               </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+                <Button
+                  label="Copier l’URI"
+                  kind="ghost"
+                  disabled={busy}
+                  onPress={() => {
+                    void (async () => {
+                      await Clipboard.setStringAsync(pendingMfaEnrollment.uri);
+                      ui.showToast('URI copiée.', 'success');
+                    })();
+                  }}
+                />
+                <Button
+                  label="Ouvrir l’app d’authentification"
+                  kind="ghost"
+                  disabled={busy}
+                  onPress={() => {
+                    void (async () => {
+                      const ok = await Linking.canOpenURL(pendingMfaEnrollment.uri);
+                      if (!ok) {
+                        ui.showToast(
+                          "Impossible d'ouvrir l'URI sur cet appareil. Copiez l'URI ou le secret dans votre app d'authentification.",
+                          'warning'
+                        );
+                        return;
+                      }
+                      await Linking.openURL(pendingMfaEnrollment.uri);
+                    })();
+                  }}
+                />
+              </View>
 
               <TextInput
                 value={code}
@@ -113,6 +185,15 @@ export function AdminMfaEnrollmentScreen() {
               />
             </View>
           ) : null}
+
+          <View style={{ marginTop: spacing.md }}>
+            <Button
+              label={busy ? 'Réinitialisation...' : 'Réinitialiser l’enrôlement MFA'}
+              kind="ghost"
+              onPress={() => void handleReset()}
+              disabled={busy}
+            />
+          </View>
 
           {error ? (
             <Text variant="caption" style={{ color: colors.rose, marginTop: spacing.sm }}>

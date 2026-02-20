@@ -50,3 +50,20 @@ export type InviteResult = {
   invited_user_id?: string | null;
   status: 'INVITED';
 };
+
+export type OrgRole = {
+  id: string;
+  org_id: string;
+  key: string;
+  name: string;
+  is_system: boolean;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+export type OrgUserRole = {
+  user_id: string;
+  org_id: string;
+  role_id: string;
+  role?: OrgRole | null;
+};

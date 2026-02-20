@@ -3,7 +3,14 @@ import { ModuleKey } from '../../core/modules';
 import { ExportType } from '../exports';
 import { TaskPriority, TaskStatus } from '../tasks';
 
-export type UxEntity = 'PROJECT' | 'TASK' | 'DOCUMENT' | 'MEDIA' | 'EXPORT' | 'CHECKLIST' | 'TEMPLATE';
+export type UxEntity =
+  | 'PROJECT'
+  | 'TASK'
+  | 'DOCUMENT'
+  | 'MEDIA'
+  | 'EXPORT'
+  | 'CHECKLIST'
+  | 'TEMPLATE';
 
 export type QuickActionKey =
   | 'NEW_TASK'
@@ -20,14 +27,6 @@ export type QuickAction = {
   requires_project: boolean;
   max_taps: number;
   order: number;
-};
-
-export type FavoriteRecord = {
-  user_id: string;
-  org_id: string;
-  entity: UxEntity;
-  entity_id: string;
-  created_at: string;
 };
 
 export type RecentRecord = {
@@ -106,10 +105,6 @@ export type UxApi = {
   listProjects: () => Promise<string[]>;
 
   getQuickActions: (role?: AppRole | null) => Promise<QuickAction[]>;
-
-  addFavorite: (entity: UxEntity, id: string) => Promise<FavoriteRecord>;
-  removeFavorite: (entity: UxEntity, id: string) => Promise<void>;
-  listFavorites: () => Promise<FavoriteRecord[]>;
 
   trackRecent: (entity: UxEntity, id: string) => Promise<RecentRecord>;
   listRecents: (limit?: number) => Promise<RecentRecord[]>;

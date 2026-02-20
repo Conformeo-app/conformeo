@@ -1,6 +1,15 @@
 import { requireSupabaseClient } from '../../core/supabase/client';
 import { appEnv } from '../../core/env';
-import { AdminActionResult, AdminOrg, AdminOrgUser, AdminSelf, DeleteOrgResult, SupportSession } from './types';
+import {
+  AdminActionResult,
+  AdminOrg,
+  AdminOrgUser,
+  AdminSelf,
+  DeleteOrgResult,
+  ImpersonationStartResult,
+  SuperAdminPermissions,
+  SupportSession
+} from './types';
 
 const INVOKE_TIMEOUT_MS = 15_000;
 
@@ -65,6 +74,15 @@ export const admin = {
     return res.data;
   },
 
+  async listPermissions(): Promise<string[]> {
+    const res = await invokeEdge<SuperAdminPermissions>({ action: 'list_sa_permissions' });
+    if (res.status === 'REJECTED') {
+      throw new Error(res.reason);
+    }
+    const perms = (res.data as SuperAdminPermissions | null)?.permissions;
+    return Array.isArray(perms) ? perms : [];
+  },
+
   async listOrgs(opts: { limit?: number; offset?: number; query?: string } = {}): Promise<AdminOrg[]> {
     const res = await invokeEdge<AdminOrg[]>({
       action: 'list_orgs',
@@ -108,6 +126,32 @@ export const admin = {
   async stopSupportSession(sessionId: string): Promise<void> {
     const res = await invokeEdge<null>({
       action: 'stop_support_session',
+      session_id: sessionId
+    });
+    if (res.status === 'REJECTED') {
+      throw new Error(res.reason);
+    }
+  },
+
+  async startImpersonation(input: {
+    org_id: string;
+    target_user_id: string;
+    reason: string;
+    expires_in_minutes?: number;
+  }): Promise<ImpersonationStartResult> {
+    const res = await invokeEdge<ImpersonationStartResult>({
+      action: 'start_impersonation',
+      ...input
+    });
+    if (res.status === 'REJECTED') {
+      throw new Error(res.reason);
+    }
+    return res.data;
+  },
+
+  async stopImpersonation(sessionId: string): Promise<void> {
+    const res = await invokeEdge<null>({
+      action: 'stop_impersonation',
       session_id: sessionId
     });
     if (res.status === 'REJECTED') {

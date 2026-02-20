@@ -70,6 +70,21 @@ export function EnabledModulesProvider({ children }: { children: React.ReactNode
       return;
     }
 
+    const applyFallbackDefaults = () => {
+      const computed = coreModules
+        .filter((module) => flags.isEnabled(module.key, { orgId: activeOrgId }))
+        .map((module) => module.key);
+      const nonEmpty = computed.length > 0 ? computed : (['dashboard'] as ModuleKey[]);
+
+      const filtered: ModuleKey[] = isSuperAdmin
+        ? nonEmpty.includes('superadmin')
+          ? nonEmpty
+          : [...nonEmpty, 'superadmin']
+        : nonEmpty.filter((key): key is Exclude<ModuleKey, 'superadmin'> => key !== 'superadmin');
+
+      setAvailableModules(filtered);
+    };
+
     const applyRows = (rows: Array<{ key: string; enabled: boolean }>) => {
       const computed = computeEnabledModules(rows);
       const filtered: ModuleKey[] = isSuperAdmin
@@ -84,7 +99,7 @@ export function EnabledModulesProvider({ children }: { children: React.ReactNode
       const cached = await flags.listAll(activeOrgId);
       applyRows(cached);
     } catch {
-      setAvailableModules(isSuperAdmin ? ALL_MODULE_KEYS : ALL_MODULE_KEYS.filter((key) => key !== 'superadmin'));
+      applyFallbackDefaults();
     }
 
     try {
@@ -118,4 +133,3 @@ export function useEnabledModules() {
   }
   return ctx;
 }
-

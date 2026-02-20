@@ -5,6 +5,7 @@ import { useEnabledModules } from '../../navigation/EnabledModulesProvider';
 import type { EnterpriseStackParamList } from '../../navigation/types';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
+import { ReleaseBadge } from '../../ui/components/ReleaseBadge';
 import { Text } from '../../ui/components/Text';
 import { Screen } from '../../ui/layout/Screen';
 import { useTheme } from '../../ui/theme/ThemeProvider';
@@ -20,6 +21,7 @@ export function EnterpriseHubScreen({ navigation }: Props) {
     () => [
       { key: 'orgs', label: 'Paramètres org', route: 'OrgAdmin' as const },
       { key: 'company', label: 'Espace entreprise', route: 'CompanyHub' as const },
+      { key: 'billing', label: 'Facturation', route: 'BillingHome' as const },
       { key: 'offers', label: 'Offres', route: 'Offers' as const },
       { key: 'governance', label: 'Gouvernance', route: 'Governance' as const },
       { key: 'backup', label: 'Sauvegarde', route: 'Backup' as const }
@@ -31,7 +33,11 @@ export function EnterpriseHubScreen({ navigation }: Props) {
 
   return (
     <Screen>
-      <SectionHeader title="Entreprise" subtitle="Espace entreprise: équipe, paramètres, modules, offres, gouvernance." />
+      <SectionHeader
+        title="Mon entreprise"
+        subtitle="Espace entreprise: équipe, paramètres, modules, offres, gouvernance."
+        right={<ReleaseBadge state="BETA" />}
+      />
 
       <View style={{ gap: spacing.md }}>
         <Card>

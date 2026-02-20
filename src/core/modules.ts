@@ -2,6 +2,7 @@ export type ModuleKey =
   | 'dashboard'
   | 'orgs'
   | 'company'
+  | 'billing'
   | 'tasks'
   | 'equipment'
   | 'planning'
@@ -28,6 +29,7 @@ export const modules: Array<{ key: ModuleKey; label: string; hint: string }> = [
   { key: 'accelerators', label: 'Accélérateurs', hint: 'Actions rapides & modèles' },
   { key: 'orgs', label: 'Entreprise', hint: 'Équipe, paramètres, modules' },
   { key: 'company', label: 'Espace entreprise', hint: 'Docs internes, certifs, sécurité' },
+  { key: 'billing', label: 'Facturation', hint: 'Clients, devis, factures, paiements' },
   { key: 'tasks', label: 'Tâches', hint: 'Création rapide + preuves' },
   { key: 'equipment', label: 'Équipements', hint: 'Matériel, mouvements, liaisons tâches' },
   { key: 'planning', label: 'Planning', hint: 'Calendrier chantier + affectations' },

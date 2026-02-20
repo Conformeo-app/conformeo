@@ -20,7 +20,10 @@ export const nav = {
 
   goProjects() {
     if (!ensureReady()) return;
-    navigationRef.navigate(ROUTES.PROJECTS as any, { screen: 'ProjectsList' } as any);
+    setCurrentContext({ projectId: undefined });
+    navigationRef.navigate(ROUTES.PROJECTS as any, {
+      screen: 'ProjectsList'
+    } as any);
   },
 
   createProject() {
@@ -56,6 +59,14 @@ export const nav = {
       return;
     }
     navigationRef.navigate(ROUTES.ENTERPRISE as any);
+  },
+
+  goBilling(params?: { screen?: string; params?: any }) {
+    if (!ensureReady()) return;
+    navigationRef.navigate(
+      ROUTES.ENTERPRISE as any,
+      { screen: params?.screen ?? 'BillingHome', params: params?.params } as any
+    );
   },
 
   goSecurity(params?: { screen?: string; params?: any }) {

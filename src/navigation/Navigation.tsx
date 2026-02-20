@@ -7,6 +7,17 @@ import { useAuth } from '../core/auth';
 import { AccountScreen } from '../features/account/AccountScreen';
 import { AuditScreen } from '../features/audit/AuditScreen';
 import { BackupScreen } from '../features/backup/BackupScreen';
+import { BillingHomeScreen } from '../features/billing/BillingHomeScreen';
+import { ClientDetailScreen } from '../features/billing/ClientDetailScreen';
+import { ClientEditScreen } from '../features/billing/ClientEditScreen';
+import { ClientsListScreen } from '../features/billing/ClientsListScreen';
+import { InvoiceDetailScreen } from '../features/billing/InvoiceDetailScreen';
+import { InvoiceEditScreen } from '../features/billing/InvoiceEditScreen';
+import { InvoicesListScreen } from '../features/billing/InvoicesListScreen';
+import { PaymentCreateModal } from '../features/billing/PaymentCreateModal';
+import { QuoteDetailScreen } from '../features/billing/QuoteDetailScreen';
+import { QuoteEditScreen } from '../features/billing/QuoteEditScreen';
+import { QuotesListScreen } from '../features/billing/QuotesListScreen';
 import { CarbonScreen } from '../features/carbon/CarbonScreen';
 import { CompanyHubScreen } from '../features/company/CompanyHubScreen';
 import { ConflictsScreen } from '../features/conflicts/ConflictsScreen';
@@ -47,6 +58,7 @@ import { flags } from '../data/feature-flags';
 import { navigationRef } from './navigationRef';
 import { assertRoutesIntegrity, ROUTES } from './routes';
 import { assertScreenKey } from './screenRegistry';
+import { assertDrawerRegistryIntegrity } from './registry';
 import type {
   AccountStackParamList,
   AuthStackParamList,
@@ -124,12 +136,13 @@ function ProjectsStackScreen() {
 
   return (
     <ProjectsStack.Navigator
+      initialRouteName="ProjectsList"
       screenOptions={{
         header: (props) => <TopBar {...props} />,
         contentStyle: { backgroundColor: colors.bg }
       }}
     >
-      <ProjectsStack.Screen name="ProjectsList" component={ProjectsListScreen} options={{ title: 'Chantiers' }} />
+      <ProjectsStack.Screen name="ProjectsList" component={ProjectsListScreen} options={{ title: 'Mes chantiers' }} />
       <ProjectsStack.Screen name="ProjectCreate" component={ProjectCreateScreen} options={{ title: 'Nouveau chantier' }} />
       <ProjectsStack.Screen name="ProjectEdit" component={ProjectEditScreen} options={{ title: 'Modifier chantier' }} />
       <ProjectsStack.Screen name="ProjectDetail" component={ProjectDetailScreen} options={{ title: 'Chantier' }} />
@@ -175,12 +188,12 @@ function EquipmentStackScreen() {
         contentStyle: { backgroundColor: colors.bg }
       }}
     >
-      <EquipmentStack.Screen name="EquipmentHome" options={{ title: 'Équipements' }}>
+      <EquipmentStack.Screen name="EquipmentHome" options={{ title: 'Parc matériel' }}>
         {() =>
           enabled ? (
             <EquipmentScreen />
           ) : (
-            <ModuleDisabledScreen moduleKey="equipment" moduleLabel="Équipements" />
+            <ModuleDisabledScreen moduleKey="equipment" moduleLabel="Parc matériel" />
           )
         }
       </EquipmentStack.Screen>
@@ -277,7 +290,7 @@ function SecurityStackScreen() {
     >
       {enabled ? (
         <>
-          <SecurityStack.Screen name="SecurityHub" component={SecurityHubScreen} options={{ title: 'Sécurité' }} />
+          <SecurityStack.Screen name="SecurityHub" component={SecurityHubScreen} options={{ title: 'Sécurité & DUERP' }} />
           {availableModules.includes('security') ? (
             <SecurityStack.Screen name="SecuritySettings" component={SecurityScreen} options={{ title: 'Identité & MFA' }} />
           ) : null}
@@ -316,8 +329,8 @@ function SecurityStackScreen() {
           ) : null}
         </>
       ) : (
-        <SecurityStack.Screen name="SecurityHub" options={{ title: 'Sécurité' }}>
-          {() => <ModuleDisabledScreen moduleKey="security" moduleLabel="Sécurité" />}
+        <SecurityStack.Screen name="SecurityHub" options={{ title: 'Sécurité & DUERP' }}>
+          {() => <ModuleDisabledScreen moduleKey="security" moduleLabel="Sécurité & DUERP" />}
         </SecurityStack.Screen>
       )}
     </SecurityStack.Navigator>
@@ -327,15 +340,23 @@ function SecurityStackScreen() {
 function EnterpriseStackScreen() {
   const { colors } = useTheme();
   const { availableModules } = useEnabledModules();
+  const billingEnabled = availableModules.includes('billing');
   const enabled =
     availableModules.includes('orgs') ||
     availableModules.includes('company') ||
+    availableModules.includes('billing') ||
     availableModules.includes('offers') ||
     availableModules.includes('governance') ||
     availableModules.includes('backup');
 
   if (enabled) {
     assertScreenKey(EnterpriseHubScreen, 'ENTERPRISE_HUB', 'EnterpriseHub');
+    if (billingEnabled) {
+      assertScreenKey(BillingHomeScreen, 'BILLING_HOME', 'BillingHome');
+      assertScreenKey(ClientsListScreen, 'BILLING_CLIENTS', 'BillingClients');
+      assertScreenKey(QuotesListScreen, 'BILLING_QUOTES', 'BillingQuotes');
+      assertScreenKey(InvoicesListScreen, 'BILLING_INVOICES', 'BillingInvoices');
+    }
   }
 
   return (
@@ -347,13 +368,112 @@ function EnterpriseStackScreen() {
     >
       {enabled ? (
         <>
-          <EnterpriseStack.Screen name="EnterpriseHub" component={EnterpriseHubScreen} options={{ title: 'Entreprise' }} />
+          <EnterpriseStack.Screen name="EnterpriseHub" component={EnterpriseHubScreen} options={{ title: 'Mon entreprise' }} />
           {availableModules.includes('orgs') ? (
             <EnterpriseStack.Screen name="OrgAdmin" component={OrgsAdminScreen} options={{ title: 'Paramètres org' }} />
           ) : null}
           {availableModules.includes('company') ? (
             <EnterpriseStack.Screen name="CompanyHub" component={CompanyHubScreen} options={{ title: 'Espace entreprise' }} />
           ) : null}
+          <EnterpriseStack.Screen name="BillingHome" options={{ title: 'Facturation' }}>
+            {(props) =>
+              billingEnabled ? (
+                <BillingHomeScreen {...props} />
+              ) : (
+                <ModuleDisabledScreen moduleKey="billing" moduleLabel="Facturation" reason="Module facturation désactivé." />
+              )
+            }
+          </EnterpriseStack.Screen>
+          <EnterpriseStack.Screen name="BillingClients" options={{ title: 'Clients' }}>
+            {(props) =>
+              billingEnabled ? (
+                <ClientsListScreen {...props} />
+              ) : (
+                <ModuleDisabledScreen moduleKey="billing" moduleLabel="Facturation" reason="Module facturation désactivé." />
+              )
+            }
+          </EnterpriseStack.Screen>
+          <EnterpriseStack.Screen name="BillingClientDetail" options={{ title: 'Client' }}>
+            {({ route, navigation }) =>
+              billingEnabled ? (
+                <ClientDetailScreen navigation={navigation} route={route} />
+              ) : (
+                <ModuleDisabledScreen moduleKey="billing" moduleLabel="Facturation" reason="Module facturation désactivé." />
+              )
+            }
+          </EnterpriseStack.Screen>
+          <EnterpriseStack.Screen name="BillingClientEdit" options={{ title: 'Client' }}>
+            {({ route, navigation }) =>
+              billingEnabled ? (
+                <ClientEditScreen navigation={navigation} route={route} />
+              ) : (
+                <ModuleDisabledScreen moduleKey="billing" moduleLabel="Facturation" reason="Module facturation désactivé." />
+              )
+            }
+          </EnterpriseStack.Screen>
+          <EnterpriseStack.Screen name="BillingQuotes" options={{ title: 'Devis' }}>
+            {(props) =>
+              billingEnabled ? (
+                <QuotesListScreen {...props} />
+              ) : (
+                <ModuleDisabledScreen moduleKey="billing" moduleLabel="Facturation" reason="Module facturation désactivé." />
+              )
+            }
+          </EnterpriseStack.Screen>
+          <EnterpriseStack.Screen name="BillingQuoteDetail" options={{ title: 'Devis' }}>
+            {({ route, navigation }) =>
+              billingEnabled ? (
+                <QuoteDetailScreen navigation={navigation} route={route} />
+              ) : (
+                <ModuleDisabledScreen moduleKey="billing" moduleLabel="Facturation" reason="Module facturation désactivé." />
+              )
+            }
+          </EnterpriseStack.Screen>
+          <EnterpriseStack.Screen name="BillingQuoteEdit" options={{ title: 'Devis' }}>
+            {({ route, navigation }) =>
+              billingEnabled ? (
+                <QuoteEditScreen navigation={navigation} route={route} />
+              ) : (
+                <ModuleDisabledScreen moduleKey="billing" moduleLabel="Facturation" reason="Module facturation désactivé." />
+              )
+            }
+          </EnterpriseStack.Screen>
+          <EnterpriseStack.Screen name="BillingInvoices" options={{ title: 'Factures' }}>
+            {(props) =>
+              billingEnabled ? (
+                <InvoicesListScreen {...props} />
+              ) : (
+                <ModuleDisabledScreen moduleKey="billing" moduleLabel="Facturation" reason="Module facturation désactivé." />
+              )
+            }
+          </EnterpriseStack.Screen>
+          <EnterpriseStack.Screen name="BillingInvoiceDetail" options={{ title: 'Facture' }}>
+            {({ route, navigation }) =>
+              billingEnabled ? (
+                <InvoiceDetailScreen navigation={navigation} route={route} />
+              ) : (
+                <ModuleDisabledScreen moduleKey="billing" moduleLabel="Facturation" reason="Module facturation désactivé." />
+              )
+            }
+          </EnterpriseStack.Screen>
+          <EnterpriseStack.Screen name="BillingInvoiceEdit" options={{ title: 'Facture' }}>
+            {({ route, navigation }) =>
+              billingEnabled ? (
+                <InvoiceEditScreen navigation={navigation} route={route} />
+              ) : (
+                <ModuleDisabledScreen moduleKey="billing" moduleLabel="Facturation" reason="Module facturation désactivé." />
+              )
+            }
+          </EnterpriseStack.Screen>
+          <EnterpriseStack.Screen name="BillingPaymentCreate" options={{ title: 'Paiement' }}>
+            {({ route, navigation }) =>
+              billingEnabled ? (
+                <PaymentCreateModal navigation={navigation} route={route} />
+              ) : (
+                <ModuleDisabledScreen moduleKey="billing" moduleLabel="Facturation" reason="Module facturation désactivé." />
+              )
+            }
+          </EnterpriseStack.Screen>
           {availableModules.includes('offers') ? (
             <EnterpriseStack.Screen name="Offers" component={OfferManagementScreen} options={{ title: 'Offres' }} />
           ) : null}
@@ -365,8 +485,8 @@ function EnterpriseStackScreen() {
           ) : null}
         </>
       ) : (
-        <EnterpriseStack.Screen name="EnterpriseHub" options={{ title: 'Entreprise' }}>
-          {() => <ModuleDisabledScreen moduleKey="orgs" moduleLabel="Entreprise" />}
+        <EnterpriseStack.Screen name="EnterpriseHub" options={{ title: 'Mon entreprise' }}>
+          {() => <ModuleDisabledScreen moduleKey="orgs" moduleLabel="Mon entreprise" />}
         </EnterpriseStack.Screen>
       )}
     </EnterpriseStack.Navigator>
@@ -384,7 +504,7 @@ function AccountStackScreen() {
         contentStyle: { backgroundColor: colors.bg }
       }}
     >
-      <AccountStack.Screen name="AccountHome" component={AccountScreen} options={{ title: 'Compte' }} />
+      <AccountStack.Screen name="AccountHome" component={AccountScreen} options={{ title: 'Mon compte' }} />
     </AccountStack.Navigator>
   );
 }
@@ -480,6 +600,7 @@ function AppDrawerScreen() {
 
 export function AppNavigator() {
   assertRoutesIntegrity();
+  assertDrawerRegistryIntegrity();
   const { colors } = useTheme();
   const { session, hasMembership, requiresMfaEnrollment } = useAuth();
   const showApp = Boolean(session) && hasMembership !== false && !requiresMfaEnrollment;

@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useAuth } from '../../core/auth';
 import {
-  FavoriteRecord,
   QuickAction,
   TemplateRecord,
   TemplateType,
@@ -19,7 +18,6 @@ import { useTheme } from '../../ui/theme/ThemeProvider';
 import { SectionHeader } from '../common/SectionHeader';
 
 const ORG_SCOPE = '__ORG__';
-const ENTITY_CHOICES: UxEntity[] = ['PROJECT', 'TASK', 'DOCUMENT', 'MEDIA', 'EXPORT', 'CHECKLIST', 'TEMPLATE'];
 const TEMPLATE_TYPES: TemplateType[] = ['TASK', 'CHECKLIST', 'EXPORT'];
 
 function toErrorMessage(error: unknown) {
@@ -98,14 +96,10 @@ export function UxAcceleratorsScreen() {
   const [projects, setProjects] = useState<string[]>([]);
 
   const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
-  const [favorites, setFavorites] = useState<FavoriteRecord[]>([]);
   const [recents, setRecents] = useState<Array<{ entity: UxEntity; entity_id: string; last_opened_at: string }>>([]);
 
   const [templateTypeFilter, setTemplateTypeFilter] = useState<TemplateType>('TASK');
   const [templatesList, setTemplatesList] = useState<TemplateRecord[]>([]);
-
-  const [favoriteEntity, setFavoriteEntity] = useState<UxEntity>('PROJECT');
-  const [favoriteEntityId, setFavoriteEntityId] = useState('');
 
   const [templateName, setTemplateName] = useState('');
   const [templatePayloadDraft, setTemplatePayloadDraft] = useState(defaultTemplatePayload('TASK'));
@@ -160,19 +154,12 @@ export function UxAcceleratorsScreen() {
 
   const refreshLists = useCallback(async () => {
     if (!activeOrgId || !user?.id) {
-      setFavorites([]);
       setRecents([]);
       setTemplatesList([]);
       return;
     }
 
-    const [nextFavorites, nextRecents, nextTemplates] = await Promise.all([
-      ux.listFavorites(),
-      ux.listRecents(30),
-      templates.list()
-    ]);
-
-    setFavorites(nextFavorites);
+    const [nextRecents, nextTemplates] = await Promise.all([ux.listRecents(30), templates.list()]);
     setRecents(nextRecents);
     setTemplatesList(nextTemplates);
   }, [activeOrgId, user?.id]);
@@ -232,39 +219,6 @@ export function UxAcceleratorsScreen() {
     [activeOrgId, selectedProject, user?.id]
   );
 
-  const addFavorite = useCallback(async () => {
-    const cleanId = favoriteEntityId.trim();
-    if (!cleanId) {
-      setError('entity_id requis.');
-      return;
-    }
-
-    await withBusy(async () => {
-      const next = await ux.addFavorite(favoriteEntity, cleanId);
-      setFavoriteEntityId('');
-      setInfo(`Favori ajouté: ${next.entity} / ${next.entity_id}`);
-    });
-  }, [favoriteEntity, favoriteEntityId]);
-
-  const addSelectedProjectFavorite = useCallback(async () => {
-    if (!selectedProject) {
-      setError('Sélectionne un chantier.');
-      return;
-    }
-
-    await withBusy(async () => {
-      await ux.addFavorite('PROJECT', selectedProject);
-      setInfo('Chantier ajouté aux favoris.');
-    });
-  }, [selectedProject]);
-
-  const removeFavorite = useCallback(async (favorite: FavoriteRecord) => {
-    await withBusy(async () => {
-      await ux.removeFavorite(favorite.entity, favorite.entity_id);
-      setInfo('Favori supprimé.');
-    });
-  }, []);
-
   const createTemplate = useCallback(async () => {
     await withBusy(async () => {
       let payload: Record<string, unknown> = {};
@@ -314,7 +268,7 @@ export function UxAcceleratorsScreen() {
       >
         <SectionHeader
           title="UX Accelerators"
-          subtitle="Quick actions, favoris, récents, templates. Cible: 3 taps max, offline-first."
+          subtitle="Quick actions, récents, templates. Cible: 3 taps max, offline-first."
         />
 
         <Card>
@@ -370,7 +324,6 @@ export function UxAcceleratorsScreen() {
 
           <View style={{ marginTop: spacing.sm, flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
             <Button label="Rafraîchir" kind="ghost" onPress={() => void refreshAll()} disabled={busy || loading} />
-            <Button label="Favori chantier" kind="ghost" onPress={() => void addSelectedProjectFavorite()} disabled={busy || !selectedProject} />
           </View>
         </Card>
 
@@ -406,86 +359,6 @@ export function UxAcceleratorsScreen() {
             {quickActions.length === 0 ? (
               <Text variant="body" style={{ color: colors.slate }}>
                 Aucune quick action disponible pour ce rôle.
-              </Text>
-            ) : null}
-          </View>
-        </Card>
-
-        <Card>
-          <Text variant="h2">Favoris</Text>
-
-          <View style={{ marginTop: spacing.sm, flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }}>
-            {ENTITY_CHOICES.map((entity) => {
-              const active = favoriteEntity === entity;
-
-              return (
-                <Pressable
-                  key={entity}
-                  onPress={() => setFavoriteEntity(entity)}
-                  style={{
-                    borderRadius: radii.pill,
-                    borderWidth: 1,
-                    borderColor: active ? colors.teal : colors.fog,
-                    backgroundColor: active ? `${colors.teal}22` : colors.white,
-                    paddingHorizontal: spacing.sm,
-                    paddingVertical: spacing.xs
-                  }}
-                >
-                  <Text variant="caption">{entity}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <TextInput
-            value={favoriteEntityId}
-            onChangeText={setFavoriteEntityId}
-            placeholder="entity_id"
-            placeholderTextColor={colors.slate}
-            style={{
-              marginTop: spacing.sm,
-              borderWidth: 1,
-              borderColor: colors.fog,
-              borderRadius: radii.md,
-              paddingHorizontal: spacing.md,
-              paddingVertical: spacing.sm,
-              backgroundColor: colors.white,
-              color: colors.ink
-            }}
-          />
-
-          <View style={{ marginTop: spacing.sm }}>
-            <Button label="Ajouter favori" onPress={() => void addFavorite()} disabled={busy} />
-          </View>
-
-          <View style={{ marginTop: spacing.sm, gap: spacing.xs }}>
-            {favorites.map((item) => (
-              <View
-                key={`${item.entity}-${item.entity_id}`}
-                style={{
-                  borderWidth: 1,
-                  borderColor: colors.fog,
-                  borderRadius: radii.md,
-                  padding: spacing.sm,
-                  backgroundColor: colors.white,
-                  flexDirection: 'row',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
-                }}
-              >
-                <View style={{ flex: 1, paddingRight: spacing.sm }}>
-                  <Text variant="bodyStrong">{item.entity}</Text>
-                  <Text variant="caption" style={{ color: colors.slate }}>
-                    {item.entity_id} • {formatDate(item.created_at)}
-                  </Text>
-                </View>
-                <Button label="Retirer" kind="ghost" onPress={() => void removeFavorite(item)} disabled={busy} />
-              </View>
-            ))}
-
-            {favorites.length === 0 ? (
-              <Text variant="body" style={{ color: colors.slate }}>
-                Aucun favori.
               </Text>
             ) : null}
           </View>

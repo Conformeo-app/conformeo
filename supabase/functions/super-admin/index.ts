@@ -6,6 +6,7 @@ type ActionResponse<T> = Ok<T> | Rejected;
 
 type SuperAdminAction =
   | { action: 'self' }
+  | { action: 'list_sa_permissions' }
   | { action: 'list_orgs'; limit?: number; offset?: number; query?: string }
   | { action: 'list_org_users'; org_id?: string }
   | {
@@ -16,6 +17,14 @@ type SuperAdminAction =
       expires_in_minutes?: number;
     }
   | { action: 'stop_support_session'; session_id?: string }
+  | {
+      action: 'start_impersonation';
+      org_id?: string;
+      target_user_id?: string;
+      reason?: string;
+      expires_in_minutes?: number;
+    }
+  | { action: 'stop_impersonation'; session_id?: string }
   | { action: 'revoke_user_sessions'; user_id?: string; org_id?: string }
   | { action: 'reset_user_mfa'; user_id?: string }
   | { action: 'delete_org'; org_id?: string; confirmation?: string };
@@ -23,6 +32,7 @@ type SuperAdminAction =
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const SUPABASE_JWT_SECRET = Deno.env.get('SUPABASE_JWT_SECRET') ?? Deno.env.get('JWT_SECRET');
 const STORAGE_BUCKETS = ['conformeo-media', 'conformeo-exports'] as const;
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
@@ -76,6 +86,40 @@ function base64UrlToBase64(input: string) {
     base64 += '='.repeat(4 - pad);
   }
   return base64;
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function base64ToBase64Url(base64: string) {
+  return base64.replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/g, '');
+}
+
+function encodeBase64Url(payload: string) {
+  return base64ToBase64Url(btoa(payload));
+}
+
+function encodeBytesBase64Url(bytes: Uint8Array) {
+  return base64ToBase64Url(bytesToBase64(bytes));
+}
+
+async function signJwtHs256(payload: Record<string, unknown>, secret: string) {
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const headerPart = encodeBase64Url(JSON.stringify(header));
+  const payloadPart = encodeBase64Url(JSON.stringify(payload));
+  const data = `${headerPart}.${payloadPart}`;
+
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signature = await crypto.subtle.sign('HMAC', key, enc.encode(data));
+  const signaturePart = encodeBytesBase64Url(new Uint8Array(signature));
+
+  return `${data}.${signaturePart}`;
 }
 
 function decodeJwtPayload(token: string) {
@@ -163,6 +207,46 @@ async function cleanupStorageForOrg(adminClient: ReturnType<typeof createClient>
   return deleted;
 }
 
+function matchesPermission(required: string, granted: string) {
+  const vRequired = normalizeText(required);
+  const vGranted = normalizeText(granted);
+  if (!vRequired || !vGranted) return false;
+  if (vGranted === '*') return true;
+  if (vGranted === vRequired) return true;
+  if (vGranted.endsWith('.*')) {
+    const prefix = vGranted.slice(0, -1);
+    return vRequired.startsWith(prefix);
+  }
+  return false;
+}
+
+async function loadSuperAdminPermissions(adminClient: ReturnType<typeof createClient>, userId: string) {
+  const { data, error } = await adminClient
+    .from('super_admin_permissions')
+    .select('permission_key')
+    .eq('user_id', userId)
+    .order('permission_key', { ascending: true });
+
+  if (error) {
+    if (isMissingRelationError(error, 'super_admin_permissions')) {
+      return null;
+    }
+    throw new Error(error.message);
+  }
+
+  const permissions = (data ?? [])
+    .map((row: any) => normalizeText(row.permission_key))
+    .filter((value) => Boolean(value));
+
+  return permissions;
+}
+
+function hasSuperAdminPermission(required: string, permissions: string[] | null) {
+  // Backward compatible: when the permissions table is missing, keep super-admin access gated by allowlist + MFA.
+  if (!permissions) return true;
+  return permissions.some((granted) => matchesPermission(required, granted));
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') {
     return jsonResponse({ status: 'REJECTED', reason: 'Method not allowed' }, 200);
@@ -223,13 +307,15 @@ Deno.serve(async (req) => {
   const isSuperAdmin = Boolean(!allowError && allowRow?.user_id);
 
   if (action === 'self') {
+    const permissions = isSuperAdmin ? await loadSuperAdminPermissions(adminClient, user.id).catch(() => []) : [];
     return jsonResponse({
       status: 'OK',
       data: {
         user_id: user.id,
         is_super_admin: isSuperAdmin,
         aal,
-        mfa_verified: aal === 'aal2'
+        mfa_verified: aal === 'aal2',
+        permissions
       }
     });
   }
@@ -242,7 +328,24 @@ Deno.serve(async (req) => {
     return jsonResponse({ status: 'REJECTED', reason: 'MFA required (aal2)' }, 200);
   }
 
+  const saPermissions = await loadSuperAdminPermissions(adminClient, user.id).catch(() => null);
+
+  function requireSaPermission(permission: string) {
+    if (!hasSuperAdminPermission(permission, saPermissions)) {
+      return jsonResponse({ status: 'REJECTED', reason: `Forbidden: missing ${permission}` }, 200);
+    }
+    return null;
+  }
+
+  if (action === 'list_sa_permissions') {
+    const denied = requireSaPermission('sa.support.access');
+    if (denied) return denied;
+    return jsonResponse({ status: 'OK', data: { permissions: saPermissions ?? [] } });
+  }
+
   if (action === 'list_orgs') {
+    const denied = requireSaPermission('sa.orgs.view');
+    if (denied) return denied;
     const limit = clampNumber((body as any).limit, 50, 1, 200);
     const offset = clampNumber((body as any).offset, 0, 0, 10_000);
     const query = normalizeText((body as any).query);
@@ -271,6 +374,8 @@ Deno.serve(async (req) => {
   }
 
   if (action === 'list_org_users') {
+    const denied = requireSaPermission('sa.orgs.view');
+    if (denied) return denied;
     const orgId = normalizeText((body as any).org_id);
     if (!orgId) {
       return jsonResponse({ status: 'REJECTED', reason: 'org_id is required' }, 200);
@@ -325,6 +430,8 @@ Deno.serve(async (req) => {
   }
 
   if (action === 'start_support_session') {
+    const denied = requireSaPermission('sa.support.access');
+    if (denied) return denied;
     const orgId = normalizeText((body as any).org_id);
     const targetUserId = normalizeText((body as any).target_user_id);
     const reason = normalizeText((body as any).reason);
@@ -387,20 +494,51 @@ Deno.serve(async (req) => {
   }
 
   if (action === 'stop_support_session') {
+    const denied = requireSaPermission('sa.support.access');
+    if (denied) return denied;
     const sessionId = normalizeText((body as any).session_id);
     if (!sessionId) {
       return jsonResponse({ status: 'REJECTED', reason: 'session_id is required' }, 200);
     }
 
+    const nowIso = new Date().toISOString();
     const { data, error } = await adminClient
       .from('support_sessions')
-      .update({ ended_at: new Date().toISOString() })
+      .update({ ended_at: nowIso, revoked_at: nowIso } as any)
       .eq('id', sessionId)
       .is('ended_at', null)
       .select('id, org_id, target_user_id')
       .maybeSingle();
 
     if (error) {
+      // Backward compat: older schema may not have revoked_at.
+      const message = normalizeText(error.message).toLowerCase();
+      if (message.includes('revoked_at') && message.includes('does not exist')) {
+        const fallback = await adminClient
+          .from('support_sessions')
+          .update({ ended_at: nowIso })
+          .eq('id', sessionId)
+          .is('ended_at', null)
+          .select('id, org_id, target_user_id')
+          .maybeSingle();
+        if (fallback.error) {
+          return jsonResponse({ status: 'REJECTED', reason: fallback.error.message }, 200);
+        }
+        if (!fallback.data) {
+          return jsonResponse({ status: 'REJECTED', reason: 'session not found or already ended' }, 200);
+        }
+        await audit(adminClient, { admin_user_id: user.id, action: 'admin.stop_support_session', target: sessionId });
+        await auditCompliance(adminClient, {
+          org_id: fallback.data.org_id,
+          user_id: user.id,
+          action: 'super_admin.impersonation.stop',
+          entity: 'SUPPORT_SESSION',
+          entity_id: fallback.data.id,
+          payload: { target_user_id: fallback.data.target_user_id }
+        });
+        return jsonResponse({ status: 'OK', data: null });
+      }
+
       return jsonResponse({ status: 'REJECTED', reason: error.message }, 200);
     }
 
@@ -422,7 +560,143 @@ Deno.serve(async (req) => {
     return jsonResponse({ status: 'OK', data: null });
   }
 
+  if (action === 'start_impersonation') {
+    const denied = requireSaPermission('sa.orgs.impersonate');
+    if (denied) return denied;
+
+    const orgId = normalizeText((body as any).org_id);
+    const targetUserId = normalizeText((body as any).target_user_id);
+    const reason = normalizeText((body as any).reason);
+    const expiresMinutes = clampNumber((body as any).expires_in_minutes, 30, 5, 240);
+
+    if (!orgId) return jsonResponse({ status: 'REJECTED', reason: 'org_id is required' }, 200);
+    if (!targetUserId) return jsonResponse({ status: 'REJECTED', reason: 'target_user_id is required' }, 200);
+    if (!reason) return jsonResponse({ status: 'REJECTED', reason: 'reason is required' }, 200);
+
+    if (!SUPABASE_JWT_SECRET) {
+      return jsonResponse({ status: 'REJECTED', reason: 'Missing SUPABASE_JWT_SECRET (server)' }, 200);
+    }
+
+    const { data: membership, error: membershipError } = await adminClient
+      .from('org_members')
+      .select('user_id')
+      .eq('org_id', orgId)
+      .eq('user_id', targetUserId)
+      .maybeSingle();
+
+    if (membershipError || !membership) {
+      return jsonResponse({ status: 'REJECTED', reason: 'target user is not org member' }, 200);
+    }
+
+    const expiresAt = new Date(Date.now() + expiresMinutes * 60_000);
+    const expiresAtIso = expiresAt.toISOString();
+
+    const { data: inserted, error: insertError } = await adminClient
+      .from('support_sessions')
+      .insert({
+        admin_user_id: user.id,
+        target_user_id: targetUserId,
+        org_id: orgId,
+        reason,
+        expires_at: expiresAtIso
+      })
+      .select('id, admin_user_id, target_user_id, org_id, reason, started_at, expires_at, ended_at, created_at')
+      .single();
+
+    if (insertError || !inserted) {
+      return jsonResponse({ status: 'REJECTED', reason: insertError?.message ?? 'insert failed' }, 200);
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const expSec = Math.floor(expiresAt.getTime() / 1000);
+
+    const accessToken = await signJwtHs256(
+      {
+        iss: 'supabase',
+        aud: 'authenticated',
+        role: 'authenticated',
+        sub: targetUserId,
+        iat: nowSec,
+        exp: expSec,
+        impersonation_session_id: inserted.id,
+        sa_user_id: user.id
+      },
+      SUPABASE_JWT_SECRET
+    );
+
+    await audit(adminClient, {
+      admin_user_id: user.id,
+      action: 'admin.start_impersonation',
+      target: `${orgId}:${targetUserId}`,
+      payload: { expires_in_minutes: expiresMinutes, reason, session_id: inserted.id }
+    });
+
+    await auditCompliance(adminClient, {
+      org_id: orgId,
+      user_id: user.id,
+      action: 'super_admin.impersonation.start',
+      entity: 'SUPPORT_SESSION',
+      entity_id: inserted.id,
+      payload: {
+        target_user_id: targetUserId,
+        reason,
+        expires_in_minutes: expiresMinutes
+      }
+    });
+
+    return jsonResponse({
+      status: 'OK',
+      data: {
+        session: inserted,
+        access_token: accessToken,
+        expires_at: expiresAtIso
+      }
+    });
+  }
+
+  if (action === 'stop_impersonation') {
+    const denied = requireSaPermission('sa.orgs.impersonate');
+    if (denied) return denied;
+
+    const sessionId = normalizeText((body as any).session_id);
+    if (!sessionId) {
+      return jsonResponse({ status: 'REJECTED', reason: 'session_id is required' }, 200);
+    }
+
+    const nowIso = new Date().toISOString();
+    const { data, error } = await adminClient
+      .from('support_sessions')
+      .update({ ended_at: nowIso, revoked_at: nowIso } as any)
+      .eq('id', sessionId)
+      .is('ended_at', null)
+      .select('id, org_id, target_user_id')
+      .maybeSingle();
+
+    if (error) {
+      return jsonResponse({ status: 'REJECTED', reason: error.message }, 200);
+    }
+
+    if (!data) {
+      return jsonResponse({ status: 'REJECTED', reason: 'session not found or already ended' }, 200);
+    }
+
+    await audit(adminClient, { admin_user_id: user.id, action: 'admin.stop_impersonation', target: sessionId });
+
+    await auditCompliance(adminClient, {
+      org_id: data.org_id,
+      user_id: user.id,
+      action: 'super_admin.impersonation.stop',
+      entity: 'SUPPORT_SESSION',
+      entity_id: data.id,
+      payload: { target_user_id: data.target_user_id }
+    });
+
+    return jsonResponse({ status: 'OK', data: null });
+  }
+
   if (action === 'revoke_user_sessions') {
+    const denied = requireSaPermission('sa.emergency.actions');
+    if (denied) return denied;
     const targetUserId = normalizeText((body as any).user_id);
     const orgId = normalizeText((body as any).org_id);
 
@@ -454,6 +728,8 @@ Deno.serve(async (req) => {
   }
 
   if (action === 'reset_user_mfa') {
+    const denied = requireSaPermission('sa.emergency.actions');
+    if (denied) return denied;
     const targetUserId = normalizeText((body as any).user_id);
     if (!targetUserId) return jsonResponse({ status: 'REJECTED', reason: 'user_id is required' }, 200);
 
@@ -484,6 +760,8 @@ Deno.serve(async (req) => {
   }
 
   if (action === 'delete_org') {
+    const denied = requireSaPermission('sa.emergency.actions');
+    if (denied) return denied;
     const orgId = normalizeText((body as any).org_id);
     const confirmation = normalizeText((body as any).confirmation);
 

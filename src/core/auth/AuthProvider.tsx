@@ -22,6 +22,7 @@ import { governance } from '../../data/data-governance';
 import { rules } from '../../data/rules-engine';
 import { geo } from '../../data/geo-context';
 import { projects } from '../../data/projects';
+import { billing } from '../../data/billing';
 
 type AuthContextValue = {
   isConfigured: boolean;
@@ -30,6 +31,7 @@ type AuthContextValue = {
   user: User | null;
   activeOrgId: string | null;
   hasMembership: boolean | null;
+  memberRole: string | null;
   role: AppRole | null;
   permissions: string[];
   profile: UserProfile | null;
@@ -45,6 +47,7 @@ type AuthContextValue = {
   bootstrapOrganization: (orgName: string) => Promise<void>;
   refreshMembership: () => Promise<void>;
   refreshAuthorization: () => Promise<void>;
+  resetAdminMfaEnrollment: () => Promise<number>;
   enrollAdminMfa: () => Promise<MfaEnrollment>;
   verifyAdminMfa: (code: string) => Promise<void>;
   disableMfa: () => Promise<void>;
@@ -76,6 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     rules.setContext({ org_id: undefined, user_id: undefined });
     geo.setContext({ org_id: undefined, user_id: undefined });
     projects.setContext({ org_id: undefined });
+    billing.setContext({ org_id: undefined, user_id: undefined });
     setRole(null);
     setPermissions([]);
     setProfile(null);
@@ -86,6 +90,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshAuthorizationForMembership = useCallback(
     async (input: { user: User; orgId: string; memberRole: string | null }) => {
       const fallbackRole = mapMemberRoleToAppRole(input.memberRole);
+
+      const client = getSupabaseClient();
+      if (client) {
+        const { error: ensureError } = await client.rpc('ensure_org_owner_role', {
+          p_org_id: input.orgId
+        });
+
+        const ensureMessage = ensureError ? toErrorMessage(ensureError).toLowerCase() : '';
+        if (ensureError && !ensureMessage.includes('does not exist') && __DEV__) {
+          console.warn('ensure_org_owner_role failed:', toErrorMessage(ensureError));
+        }
+      }
 
       const nextProfile = await identity.ensureProfileForOrg({
         user: input.user,
@@ -101,6 +117,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       rbac.clearCache();
       const nextPermissions = await rbac.listPermissions({ orgId: input.orgId });
       setPermissions(nextPermissions);
+
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.info('[auth] RBAC hydrated', {
+          userId: input.user.id,
+          orgId: input.orgId,
+          memberRole: input.memberRole,
+          role: nextRole,
+          permissionsCount: nextPermissions.length,
+          profileOrgId: nextProfile.org_id
+        });
+      }
 
       if (nextRole === 'ADMIN') {
         const hasVerifiedTotp = await mfa.hasVerifiedTotp();
@@ -127,6 +155,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      let membership: Awaited<ReturnType<typeof resolveMembership>> | null = null;
+
       try {
         const client = getSupabaseClient();
         if (client) {
@@ -137,7 +167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        const membership = await resolveMembership(nextSession.user.id);
+        membership = await resolveMembership(nextSession.user.id);
         setActiveOrgId(membership.orgId);
         setHasMembership(Boolean(membership.orgId));
         setMemberRole(membership.memberRole);
@@ -158,6 +188,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
 
         audit.setContext({
+          org_id: membership.orgId ?? undefined,
+          user_id: nextSession.user.id
+        });
+
+        billing.setContext({
           org_id: membership.orgId ?? undefined,
           user_id: nextSession.user.id
         });
@@ -207,7 +242,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           memberRole: membership.memberRole
         });
       } catch (error) {
-        resetSecurityState();
+        // Do not leave the app in a half-hydrated state (org selected but role/permissions null).
+        // Keep a safe fallback based on org_members.role while logging the root cause in dev.
+        const fallbackOrgId = membership?.orgId ?? null;
+        const fallbackMemberRole = membership?.memberRole ?? null;
+
+        if (nextSession.user && fallbackOrgId) {
+          const fallbackRole = mapMemberRoleToAppRole(fallbackMemberRole);
+          setRole(fallbackRole);
+          setProfile(null);
+          setRequiresMfaEnrollment(false);
+          setPendingMfaEnrollment(null);
+
+          try {
+            rbac.clearCache();
+            const nextPermissions = await rbac.listPermissions({ orgId: fallbackOrgId });
+            setPermissions(nextPermissions);
+          } catch {
+            setPermissions([]);
+          }
+
+          if (__DEV__) {
+            // eslint-disable-next-line no-console
+            console.warn('[auth] RBAC hydration failed; using fallback role', {
+              userId: nextSession.user.id,
+              orgId: fallbackOrgId,
+              memberRole: fallbackMemberRole,
+              role: fallbackRole
+            });
+          }
+        } else {
+          setActiveOrgId(null);
+          setHasMembership(false);
+          setMemberRole(null);
+          resetSecurityState();
+        }
         if (__DEV__) {
           console.warn('syncFromSession failed:', toErrorMessage(error));
         }
@@ -305,6 +374,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       memberRole
     });
   }, [activeOrgId, memberRole, refreshAuthorizationForMembership, resetSecurityState, session]);
+
+  const resetAdminMfaEnrollment = useCallback(async () => {
+    const removed = await mfa.resetUnverifiedTotp();
+    setPendingMfaEnrollment(null);
+    await refreshAuthorization();
+    return removed;
+  }, [refreshAuthorization]);
 
   useEffect(() => {
     const client = getSupabaseClient();
@@ -493,6 +569,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user: session?.user ?? null,
       activeOrgId,
       hasMembership,
+      memberRole,
       role,
       permissions,
       profile,
@@ -506,6 +583,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       bootstrapOrganization,
       refreshMembership,
       refreshAuthorization,
+      resetAdminMfaEnrollment,
       enrollAdminMfa,
       verifyAdminMfa,
       disableMfa,
@@ -520,6 +598,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       hasMembership,
       listSessions,
       loading,
+      memberRole,
       pendingMfaEnrollment,
       permissions,
       profile,
@@ -527,6 +606,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refreshMembership,
       refreshSession,
       requiresMfaEnrollment,
+      resetAdminMfaEnrollment,
       revokeSession,
       role,
       session,

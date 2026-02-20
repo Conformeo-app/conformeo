@@ -9,7 +9,9 @@ import { ROUTES } from '../../navigation/routes';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
 import { KpiCard } from '../../ui/components/KpiCard';
+import { QuickActions } from '../../ui/components/QuickActions';
 import { QuotaBadge } from '../../ui/components/QuotaBadge';
+import { ReleaseBadge } from '../../ui/components/ReleaseBadge';
 import { RiskBadge } from '../../ui/components/RiskBadge';
 import { Text } from '../../ui/components/Text';
 import { Screen } from '../../ui/layout/Screen';
@@ -295,7 +297,11 @@ export function DashboardScreen() {
   return (
     <Screen>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: spacing.xl }} keyboardShouldPersistTaps="handled">
-        <SectionHeader title="Tableau de bord" subtitle="Santé globale, alertes, chantiers prioritaires, actions rapides (offline-first)." />
+        <SectionHeader
+          title="Tableau de bord"
+          subtitle="Santé globale, alertes, chantiers prioritaires, actions rapides (offline-first)."
+          right={<ReleaseBadge state="READY" />}
+        />
 
         {global.isOffline ? <OfflineBanner /> : null}
         <View style={{ marginTop: spacing.sm }}>
@@ -388,30 +394,73 @@ export function DashboardScreen() {
           ) : null}
         </Card>
 
-        <Card style={{ marginTop: spacing.md }}>
-          <Text variant="h2">Actions rapides</Text>
-          <Text variant="caption" style={{ color: colors.mutedText, marginTop: spacing.xs }}>
-            Ciblées sur le dernier chantier ouvert (ou le plus prioritaire).
-          </Text>
-
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
-            {hasTasks ? (
-              <Button label="Tâche" onPress={() => void runQuickAction('NEW_TASK')} disabled={busy} />
-            ) : null}
-            {hasMedia ? (
-              <Button label="Preuve" kind="ghost" onPress={() => void runQuickAction('ADD_PROOF')} disabled={busy} />
-            ) : null}
-            {hasProjects ? (
-              <Button label="Chantier" kind="ghost" onPress={() => nav.createProject()} disabled={busy} />
-            ) : null}
-            {hasExports ? (
-              <Button label="Pack contrôle" kind="ghost" onPress={() => void runQuickAction('GENERATE_CONTROL_PACK')} disabled={busy} />
-            ) : null}
-            {hasControl ? (
-              <Button label="Mode contrôle" kind="ghost" onPress={() => void toggleControlMode()} disabled={busy} />
-            ) : null}
-          </View>
-        </Card>
+        <QuickActions
+          style={{ marginTop: spacing.md }}
+          title="Actions rapides"
+          subtitle="Ciblées sur le dernier chantier ouvert (ou le plus prioritaire)."
+          items={[
+            ...(hasTasks
+              ? [
+                  {
+                    key: 'NEW_TASK',
+                    label: 'Nouvelle tâche',
+                    hint: 'Créer une tâche terrain en 1 tap.',
+                    icon: 'checkbox-marked-outline' as const,
+                    disabled: busy,
+                    onPress: () => void runQuickAction('NEW_TASK')
+                  }
+                ]
+              : []),
+            ...(hasMedia
+              ? [
+                  {
+                    key: 'ADD_PROOF',
+                    label: 'Photo preuve',
+                    hint: 'Capture optimisée + offline.',
+                    icon: 'camera' as const,
+                    disabled: busy,
+                    onPress: () => void runQuickAction('ADD_PROOF')
+                  }
+                ]
+              : []),
+            ...(hasExports
+              ? [
+                  {
+                    key: 'GENERATE_CONTROL_PACK',
+                    label: 'Pack contrôle',
+                    hint: 'Exporter un pack inspection.',
+                    icon: 'clipboard-check-outline' as const,
+                    disabled: busy,
+                    onPress: () => void runQuickAction('GENERATE_CONTROL_PACK')
+                  }
+                ]
+              : []),
+            ...(hasControl
+              ? [
+                  {
+                    key: 'CONTROL_MODE',
+                    label: 'Mode contrôle',
+                    hint: 'Verrouille le chantier en lecture seule.',
+                    icon: 'shield-check' as const,
+                    disabled: busy,
+                    onPress: () => void toggleControlMode()
+                  }
+                ]
+              : []),
+            ...(hasProjects
+              ? [
+                  {
+                    key: 'CREATE_PROJECT',
+                    label: 'Créer un chantier',
+                    hint: 'Création offline-first.',
+                    icon: 'plus-box' as const,
+                    disabled: busy,
+                    onPress: () => nav.createProject()
+                  }
+                ]
+              : [])
+          ]}
+        />
 
         {info ? (
           <Text variant="caption" style={{ color: colors.success, marginTop: spacing.md }}>

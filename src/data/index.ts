@@ -57,3 +57,4 @@ export * from './quotas-limits';
 export * from './backup-restore';
 export * from './super-admin';
 export * from './data-governance';
+export * from './billing';

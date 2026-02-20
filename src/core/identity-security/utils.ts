@@ -108,27 +108,102 @@ export async function resolveMembership(
   preferredOrgId?: string | null,
   client: SupabaseClient = requireSupabaseClient()
 ): Promise<{ orgId: string | null; memberRole: string | null }> {
-  const query = client
+  // Prefer ACTIVE memberships (if the status column exists) and pick the most recent one.
+  // This prevents "wrong org" selection when a user has old invites or multiple org memberships.
+  type OrgMemberRowWithStatus = OrgMemberRow & { status: string | null; created_at: string | null };
+
+  const queryWithStatus = client
     .from('org_members')
-    .select('org_id, role')
+    .select('org_id, role, status, created_at')
     .eq('user_id', userId)
-    .order('created_at', { ascending: true })
-    .limit(1);
+    .order('created_at', { ascending: false })
+    .limit(20);
 
   if (preferredOrgId) {
-    query.eq('org_id', preferredOrgId);
+    queryWithStatus.eq('org_id', preferredOrgId);
   }
 
-  const { data, error } = await query.maybeSingle<OrgMemberRow>();
+  const { data, error } = await queryWithStatus;
+
+  // Backward compatible: org_members may not have a status column yet.
+  if (error && isMissingColumnError(error, 'status')) {
+    const fallbackQuery = client
+      .from('org_members')
+      .select('org_id, role')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (preferredOrgId) {
+      fallbackQuery.eq('org_id', preferredOrgId);
+    }
+
+    const fallback = await fallbackQuery.maybeSingle<OrgMemberRow>();
+    if (fallback.error) {
+      throw new Error(fallback.error.message);
+    }
+
+    return {
+      orgId: fallback.data?.org_id ?? null,
+      memberRole: fallback.data?.role ?? null
+    };
+  }
 
   if (error) {
     throw new Error(error.message);
   }
 
-  return {
-    orgId: data?.org_id ?? null,
-    memberRole: data?.role ?? null
-  };
+  const rows = (Array.isArray(data) ? data : []) as OrgMemberRowWithStatus[];
+  if (rows.length === 0) {
+    return { orgId: null, memberRole: null };
+  }
+
+  const normalizeStatus = (value: unknown) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : '';
+
+  const activeRow = rows.find((row) => normalizeStatus(row.status) === 'ACTIVE') ?? null;
+
+  if (activeRow) {
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.info('[identity] resolveMembership', {
+        selectedOrgId: activeRow.org_id,
+        selectedRole: activeRow.role,
+        candidates: rows.map((row) => ({ org_id: row.org_id, role: row.role, status: row.status })).slice(0, 8)
+      });
+    }
+
+    return {
+      orgId: activeRow.org_id ?? null,
+      memberRole: activeRow.role ?? null
+    };
+  }
+
+  const hasStatusNull = rows.some((row) => row.status == null);
+  if (hasStatusNull) {
+    const first = rows[0];
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.info('[identity] resolveMembership (no status values)', {
+        selectedOrgId: first?.org_id ?? null,
+        selectedRole: first?.role ?? null,
+        candidates: rows.map((row) => ({ org_id: row.org_id, role: row.role, status: row.status })).slice(0, 8)
+      });
+    }
+    return {
+      orgId: first?.org_id ?? null,
+      memberRole: first?.role ?? null
+    };
+  }
+
+  // Only INVITED (or other non-active) memberships -> no active org yet.
+  if (__DEV__) {
+    // eslint-disable-next-line no-console
+    console.info('[identity] resolveMembership (no active membership)', {
+      candidates: rows.map((row) => ({ org_id: row.org_id, role: row.role, status: row.status })).slice(0, 8)
+    });
+  }
+  return { orgId: null, memberRole: null };
 }
 
 export function extractSessionId(accessToken: string | null | undefined) {

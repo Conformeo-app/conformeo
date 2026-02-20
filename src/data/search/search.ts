@@ -18,15 +18,34 @@ const TASKS_TABLE = 'tasks';
 const DOCUMENTS_TABLE = 'documents';
 const MEDIA_TABLE = 'media_assets';
 const EXPORTS_TABLE = 'export_jobs';
+const BILLING_CLIENTS_TABLE = 'billing_clients';
+const BILLING_QUOTES_TABLE = 'billing_quotes';
+const BILLING_INVOICES_TABLE = 'billing_invoices';
 
 const DEFAULT_LIMIT = 40;
 const MAX_LIMIT = 200;
 const DEFAULT_SUGGESTIONS_LIMIT = 8;
 const MAX_SUGGESTIONS_LIMIT = 20;
 
-const ALLOWED_ENTITIES: SearchEntity[] = ['TASK', 'DOCUMENT', 'MEDIA', 'EXPORT'];
+const ALLOWED_ENTITIES: SearchEntity[] = [
+  'TASK',
+  'DOCUMENT',
+  'MEDIA',
+  'EXPORT',
+  'BILLING_INVOICE',
+  'BILLING_QUOTE',
+  'BILLING_CLIENT'
+];
 
-const RESULT_GROUP_ORDER: SearchEntity[] = ['TASK', 'DOCUMENT', 'MEDIA', 'EXPORT'];
+const RESULT_GROUP_ORDER: SearchEntity[] = [
+  'TASK',
+  'DOCUMENT',
+  'MEDIA',
+  'EXPORT',
+  'BILLING_INVOICE',
+  'BILLING_QUOTE',
+  'BILLING_CLIENT'
+];
 
 type CountRow = { count: number };
 
@@ -106,6 +125,49 @@ type ExportRow = {
   created_at: string;
   finished_at: string | null;
   last_error: string | null;
+};
+
+type BillingClientRow = {
+  id: string;
+  org_id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  vat_number: string | null;
+  updated_at: string;
+  created_at: string;
+  deleted_at: string | null;
+};
+
+type BillingQuoteRow = {
+  id: string;
+  org_id: string;
+  client_id: string;
+  client_name: string | null;
+  number: string;
+  status: string;
+  issue_date: string;
+  valid_until: string | null;
+  total: number;
+  updated_at: string;
+  created_at: string;
+  deleted_at: string | null;
+};
+
+type BillingInvoiceRow = {
+  id: string;
+  org_id: string;
+  client_id: string;
+  client_name: string | null;
+  number: string;
+  status: string;
+  issue_date: string;
+  due_date: string | null;
+  total: number;
+  paid_total: number;
+  updated_at: string;
+  created_at: string;
+  deleted_at: string | null;
 };
 
 type SuggestRow = {
@@ -634,12 +696,264 @@ async function installExportTriggers(db: SQLite.SQLiteDatabase) {
   `);
 }
 
+async function installBillingClientTriggers(db: SQLite.SQLiteDatabase) {
+  if (!(await tableExists(db, BILLING_CLIENTS_TABLE))) {
+    return;
+  }
+
+  await db.execAsync(`
+    CREATE TRIGGER IF NOT EXISTS trg_search_billing_clients_insert
+    AFTER INSERT ON ${BILLING_CLIENTS_TABLE}
+    WHEN NEW.deleted_at IS NULL
+    BEGIN
+      INSERT OR REPLACE INTO ${SEARCH_INDEX_TABLE}
+      (
+        id, org_id, entity, entity_id, project_id,
+        title, body, tags_json, updated_at,
+        title_norm, body_norm, tags_norm
+      )
+      VALUES
+      (
+        'BILLING_CLIENT:' || NEW.id,
+        NEW.org_id,
+        'BILLING_CLIENT',
+        NEW.id,
+        NULL,
+        COALESCE(NULLIF(TRIM(NEW.name), ''), 'Client ' || NEW.id),
+        TRIM(COALESCE(NEW.email, '') || ' ' || COALESCE(NEW.phone, '') || ' ' || COALESCE(NEW.vat_number, '')),
+        '[]',
+        COALESCE(NEW.updated_at, NEW.created_at, datetime('now')),
+        LOWER(COALESCE(NULLIF(TRIM(NEW.name), ''), 'Client ' || NEW.id)),
+        LOWER(TRIM(COALESCE(NEW.email, '') || ' ' || COALESCE(NEW.phone, '') || ' ' || COALESCE(NEW.vat_number, ''))),
+        '[]'
+      );
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_search_billing_clients_update_upsert
+    AFTER UPDATE ON ${BILLING_CLIENTS_TABLE}
+    WHEN NEW.deleted_at IS NULL
+    BEGIN
+      INSERT OR REPLACE INTO ${SEARCH_INDEX_TABLE}
+      (
+        id, org_id, entity, entity_id, project_id,
+        title, body, tags_json, updated_at,
+        title_norm, body_norm, tags_norm
+      )
+      VALUES
+      (
+        'BILLING_CLIENT:' || NEW.id,
+        NEW.org_id,
+        'BILLING_CLIENT',
+        NEW.id,
+        NULL,
+        COALESCE(NULLIF(TRIM(NEW.name), ''), 'Client ' || NEW.id),
+        TRIM(COALESCE(NEW.email, '') || ' ' || COALESCE(NEW.phone, '') || ' ' || COALESCE(NEW.vat_number, '')),
+        '[]',
+        COALESCE(NEW.updated_at, NEW.created_at, datetime('now')),
+        LOWER(COALESCE(NULLIF(TRIM(NEW.name), ''), 'Client ' || NEW.id)),
+        LOWER(TRIM(COALESCE(NEW.email, '') || ' ' || COALESCE(NEW.phone, '') || ' ' || COALESCE(NEW.vat_number, ''))),
+        '[]'
+      );
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_search_billing_clients_update_delete
+    AFTER UPDATE ON ${BILLING_CLIENTS_TABLE}
+    WHEN NEW.deleted_at IS NOT NULL
+    BEGIN
+      DELETE FROM ${SEARCH_INDEX_TABLE} WHERE id = 'BILLING_CLIENT:' || NEW.id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_search_billing_clients_delete
+    AFTER DELETE ON ${BILLING_CLIENTS_TABLE}
+    BEGIN
+      DELETE FROM ${SEARCH_INDEX_TABLE} WHERE id = 'BILLING_CLIENT:' || OLD.id;
+    END;
+  `);
+}
+
+async function installBillingQuoteTriggers(db: SQLite.SQLiteDatabase) {
+  if (!(await tableExists(db, BILLING_QUOTES_TABLE))) {
+    return;
+  }
+
+  await db.execAsync(`
+    CREATE TRIGGER IF NOT EXISTS trg_search_billing_quotes_insert
+    AFTER INSERT ON ${BILLING_QUOTES_TABLE}
+    WHEN NEW.deleted_at IS NULL
+    BEGIN
+      INSERT OR REPLACE INTO ${SEARCH_INDEX_TABLE}
+      (
+        id, org_id, entity, entity_id, project_id,
+        title, body, tags_json, updated_at,
+        title_norm, body_norm, tags_norm
+      )
+      VALUES
+      (
+        'BILLING_QUOTE:' || NEW.id,
+        NEW.org_id,
+        'BILLING_QUOTE',
+        NEW.id,
+        NULL,
+        COALESCE(NULLIF(TRIM(NEW.number), ''), 'Devis ' || NEW.id),
+        TRIM(
+          COALESCE((SELECT c.name FROM ${BILLING_CLIENTS_TABLE} c WHERE c.id = NEW.client_id LIMIT 1), '') || ' ' ||
+          COALESCE(NEW.status, '') || ' ' || COALESCE(NEW.issue_date, '')
+        ),
+        CASE WHEN NEW.status IS NULL OR LENGTH(TRIM(NEW.status)) = 0 THEN '[]' ELSE json_array(LOWER(TRIM(NEW.status))) END,
+        COALESCE(NEW.updated_at, NEW.created_at, datetime('now')),
+        LOWER(COALESCE(NULLIF(TRIM(NEW.number), ''), 'Devis ' || NEW.id)),
+        LOWER(TRIM(
+          COALESCE((SELECT c.name FROM ${BILLING_CLIENTS_TABLE} c WHERE c.id = NEW.client_id LIMIT 1), '') || ' ' ||
+          COALESCE(NEW.status, '') || ' ' || COALESCE(NEW.issue_date, '')
+        )),
+        LOWER(CASE WHEN NEW.status IS NULL OR LENGTH(TRIM(NEW.status)) = 0 THEN '[]' ELSE json_array(LOWER(TRIM(NEW.status))) END)
+      );
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_search_billing_quotes_update_upsert
+    AFTER UPDATE ON ${BILLING_QUOTES_TABLE}
+    WHEN NEW.deleted_at IS NULL
+    BEGIN
+      INSERT OR REPLACE INTO ${SEARCH_INDEX_TABLE}
+      (
+        id, org_id, entity, entity_id, project_id,
+        title, body, tags_json, updated_at,
+        title_norm, body_norm, tags_norm
+      )
+      VALUES
+      (
+        'BILLING_QUOTE:' || NEW.id,
+        NEW.org_id,
+        'BILLING_QUOTE',
+        NEW.id,
+        NULL,
+        COALESCE(NULLIF(TRIM(NEW.number), ''), 'Devis ' || NEW.id),
+        TRIM(
+          COALESCE((SELECT c.name FROM ${BILLING_CLIENTS_TABLE} c WHERE c.id = NEW.client_id LIMIT 1), '') || ' ' ||
+          COALESCE(NEW.status, '') || ' ' || COALESCE(NEW.issue_date, '')
+        ),
+        CASE WHEN NEW.status IS NULL OR LENGTH(TRIM(NEW.status)) = 0 THEN '[]' ELSE json_array(LOWER(TRIM(NEW.status))) END,
+        COALESCE(NEW.updated_at, NEW.created_at, datetime('now')),
+        LOWER(COALESCE(NULLIF(TRIM(NEW.number), ''), 'Devis ' || NEW.id)),
+        LOWER(TRIM(
+          COALESCE((SELECT c.name FROM ${BILLING_CLIENTS_TABLE} c WHERE c.id = NEW.client_id LIMIT 1), '') || ' ' ||
+          COALESCE(NEW.status, '') || ' ' || COALESCE(NEW.issue_date, '')
+        )),
+        LOWER(CASE WHEN NEW.status IS NULL OR LENGTH(TRIM(NEW.status)) = 0 THEN '[]' ELSE json_array(LOWER(TRIM(NEW.status))) END)
+      );
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_search_billing_quotes_update_delete
+    AFTER UPDATE ON ${BILLING_QUOTES_TABLE}
+    WHEN NEW.deleted_at IS NOT NULL
+    BEGIN
+      DELETE FROM ${SEARCH_INDEX_TABLE} WHERE id = 'BILLING_QUOTE:' || NEW.id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_search_billing_quotes_delete
+    AFTER DELETE ON ${BILLING_QUOTES_TABLE}
+    BEGIN
+      DELETE FROM ${SEARCH_INDEX_TABLE} WHERE id = 'BILLING_QUOTE:' || OLD.id;
+    END;
+  `);
+}
+
+async function installBillingInvoiceTriggers(db: SQLite.SQLiteDatabase) {
+  if (!(await tableExists(db, BILLING_INVOICES_TABLE))) {
+    return;
+  }
+
+  await db.execAsync(`
+    CREATE TRIGGER IF NOT EXISTS trg_search_billing_invoices_insert
+    AFTER INSERT ON ${BILLING_INVOICES_TABLE}
+    WHEN NEW.deleted_at IS NULL
+    BEGIN
+      INSERT OR REPLACE INTO ${SEARCH_INDEX_TABLE}
+      (
+        id, org_id, entity, entity_id, project_id,
+        title, body, tags_json, updated_at,
+        title_norm, body_norm, tags_norm
+      )
+      VALUES
+      (
+        'BILLING_INVOICE:' || NEW.id,
+        NEW.org_id,
+        'BILLING_INVOICE',
+        NEW.id,
+        NULL,
+        COALESCE(NULLIF(TRIM(NEW.number), ''), 'Facture ' || NEW.id),
+        TRIM(
+          COALESCE((SELECT c.name FROM ${BILLING_CLIENTS_TABLE} c WHERE c.id = NEW.client_id LIMIT 1), '') || ' ' ||
+          COALESCE(NEW.status, '') || ' ' || COALESCE(NEW.issue_date, '') || ' ' || COALESCE(NEW.due_date, '')
+        ),
+        CASE WHEN NEW.status IS NULL OR LENGTH(TRIM(NEW.status)) = 0 THEN '[]' ELSE json_array(LOWER(TRIM(NEW.status))) END,
+        COALESCE(NEW.updated_at, NEW.created_at, datetime('now')),
+        LOWER(COALESCE(NULLIF(TRIM(NEW.number), ''), 'Facture ' || NEW.id)),
+        LOWER(TRIM(
+          COALESCE((SELECT c.name FROM ${BILLING_CLIENTS_TABLE} c WHERE c.id = NEW.client_id LIMIT 1), '') || ' ' ||
+          COALESCE(NEW.status, '') || ' ' || COALESCE(NEW.issue_date, '') || ' ' || COALESCE(NEW.due_date, '')
+        )),
+        LOWER(CASE WHEN NEW.status IS NULL OR LENGTH(TRIM(NEW.status)) = 0 THEN '[]' ELSE json_array(LOWER(TRIM(NEW.status))) END)
+      );
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_search_billing_invoices_update_upsert
+    AFTER UPDATE ON ${BILLING_INVOICES_TABLE}
+    WHEN NEW.deleted_at IS NULL
+    BEGIN
+      INSERT OR REPLACE INTO ${SEARCH_INDEX_TABLE}
+      (
+        id, org_id, entity, entity_id, project_id,
+        title, body, tags_json, updated_at,
+        title_norm, body_norm, tags_norm
+      )
+      VALUES
+      (
+        'BILLING_INVOICE:' || NEW.id,
+        NEW.org_id,
+        'BILLING_INVOICE',
+        NEW.id,
+        NULL,
+        COALESCE(NULLIF(TRIM(NEW.number), ''), 'Facture ' || NEW.id),
+        TRIM(
+          COALESCE((SELECT c.name FROM ${BILLING_CLIENTS_TABLE} c WHERE c.id = NEW.client_id LIMIT 1), '') || ' ' ||
+          COALESCE(NEW.status, '') || ' ' || COALESCE(NEW.issue_date, '') || ' ' || COALESCE(NEW.due_date, '')
+        ),
+        CASE WHEN NEW.status IS NULL OR LENGTH(TRIM(NEW.status)) = 0 THEN '[]' ELSE json_array(LOWER(TRIM(NEW.status))) END,
+        COALESCE(NEW.updated_at, NEW.created_at, datetime('now')),
+        LOWER(COALESCE(NULLIF(TRIM(NEW.number), ''), 'Facture ' || NEW.id)),
+        LOWER(TRIM(
+          COALESCE((SELECT c.name FROM ${BILLING_CLIENTS_TABLE} c WHERE c.id = NEW.client_id LIMIT 1), '') || ' ' ||
+          COALESCE(NEW.status, '') || ' ' || COALESCE(NEW.issue_date, '') || ' ' || COALESCE(NEW.due_date, '')
+        )),
+        LOWER(CASE WHEN NEW.status IS NULL OR LENGTH(TRIM(NEW.status)) = 0 THEN '[]' ELSE json_array(LOWER(TRIM(NEW.status))) END)
+      );
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_search_billing_invoices_update_delete
+    AFTER UPDATE ON ${BILLING_INVOICES_TABLE}
+    WHEN NEW.deleted_at IS NOT NULL
+    BEGIN
+      DELETE FROM ${SEARCH_INDEX_TABLE} WHERE id = 'BILLING_INVOICE:' || NEW.id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_search_billing_invoices_delete
+    AFTER DELETE ON ${BILLING_INVOICES_TABLE}
+    BEGIN
+      DELETE FROM ${SEARCH_INDEX_TABLE} WHERE id = 'BILLING_INVOICE:' || OLD.id;
+    END;
+  `);
+}
+
 async function installEntityTriggers(db: SQLite.SQLiteDatabase) {
   await Promise.all([
     installTaskTriggers(db),
     installDocumentTriggers(db),
     installMediaTriggers(db),
-    installExportTriggers(db)
+    installExportTriggers(db),
+    installBillingClientTriggers(db),
+    installBillingQuoteTriggers(db),
+    installBillingInvoiceTriggers(db)
   ]);
 }
 
@@ -750,6 +1064,71 @@ function mapExportRowToEntry(row: ExportRow): SearchEntry {
     body: `${normalizeText(row.type)} ${normalizeText(row.status)} ${normalizeText(row.last_error)}`,
     tags: [],
     updated_at: toOptional(row.finished_at) ?? toOptional(row.created_at) ?? nowIso()
+  };
+}
+
+function mapBillingClientRowToEntry(row: BillingClientRow): SearchEntry | null {
+  if (row.deleted_at) {
+    return null;
+  }
+
+  const title = normalizeText(row.name) || `Client ${row.id.slice(0, 8)}`;
+  const body = `${normalizeText(row.email)} ${normalizeText(row.phone)} ${normalizeText(row.vat_number)}`.trim();
+
+  return {
+    id: buildSearchId('BILLING_CLIENT', row.id),
+    org_id: row.org_id,
+    entity: 'BILLING_CLIENT',
+    entity_id: row.id,
+    project_id: null,
+    title,
+    body,
+    tags: [],
+    updated_at: toOptional(row.updated_at) ?? toOptional(row.created_at) ?? nowIso()
+  };
+}
+
+function mapBillingQuoteRowToEntry(row: BillingQuoteRow): SearchEntry | null {
+  if (row.deleted_at) {
+    return null;
+  }
+
+  const title = normalizeText(row.number) || `Devis ${row.id.slice(0, 8)}`;
+  const body = `${normalizeText(row.client_name)} ${normalizeText(row.status)} ${normalizeText(row.issue_date)}`.trim();
+  const tags = normalizeText(row.status) ? [normalizeText(row.status)] : [];
+
+  return {
+    id: buildSearchId('BILLING_QUOTE', row.id),
+    org_id: row.org_id,
+    entity: 'BILLING_QUOTE',
+    entity_id: row.id,
+    project_id: null,
+    title,
+    body,
+    tags,
+    updated_at: toOptional(row.updated_at) ?? toOptional(row.created_at) ?? nowIso()
+  };
+}
+
+function mapBillingInvoiceRowToEntry(row: BillingInvoiceRow): SearchEntry | null {
+  if (row.deleted_at) {
+    return null;
+  }
+
+  const title = normalizeText(row.number) || `Facture ${row.id.slice(0, 8)}`;
+  const body = `${normalizeText(row.client_name)} ${normalizeText(row.status)} ${normalizeText(row.issue_date)} ${normalizeText(row.due_date)}`.trim();
+  const tags = normalizeText(row.status) ? [normalizeText(row.status)] : [];
+
+  return {
+    id: buildSearchId('BILLING_INVOICE', row.id),
+    org_id: row.org_id,
+    entity: 'BILLING_INVOICE',
+    entity_id: row.id,
+    project_id: null,
+    title,
+    body,
+    tags,
+    updated_at: toOptional(row.updated_at) ?? toOptional(row.created_at) ?? nowIso()
   };
 }
 
@@ -868,6 +1247,86 @@ async function rebuildAllInternal(db: SQLite.SQLiteDatabase) {
     `);
   }
 
+  if (await tableExists(db, BILLING_CLIENTS_TABLE)) {
+    await db.execAsync(`
+      INSERT OR REPLACE INTO ${SEARCH_INDEX_TABLE}
+      (
+        id, org_id, entity, entity_id, project_id,
+        title, body, tags_json, updated_at,
+        title_norm, body_norm, tags_norm
+      )
+      SELECT
+        'BILLING_CLIENT:' || id,
+        org_id,
+        'BILLING_CLIENT',
+        id,
+        NULL,
+        COALESCE(NULLIF(TRIM(name), ''), 'Client ' || id),
+        TRIM(COALESCE(email, '') || ' ' || COALESCE(phone, '') || ' ' || COALESCE(vat_number, '')),
+        '[]',
+        COALESCE(updated_at, created_at, datetime('now')),
+        LOWER(COALESCE(NULLIF(TRIM(name), ''), 'Client ' || id)),
+        LOWER(TRIM(COALESCE(email, '') || ' ' || COALESCE(phone, '') || ' ' || COALESCE(vat_number, ''))),
+        '[]'
+      FROM ${BILLING_CLIENTS_TABLE}
+      WHERE deleted_at IS NULL;
+    `);
+  }
+
+  if (await tableExists(db, BILLING_QUOTES_TABLE)) {
+    await db.execAsync(`
+      INSERT OR REPLACE INTO ${SEARCH_INDEX_TABLE}
+      (
+        id, org_id, entity, entity_id, project_id,
+        title, body, tags_json, updated_at,
+        title_norm, body_norm, tags_norm
+      )
+      SELECT
+        'BILLING_QUOTE:' || q.id,
+        q.org_id,
+        'BILLING_QUOTE',
+        q.id,
+        NULL,
+        COALESCE(NULLIF(TRIM(q.number), ''), 'Devis ' || q.id),
+        TRIM(COALESCE(c.name, '') || ' ' || COALESCE(q.status, '') || ' ' || COALESCE(q.issue_date, '')),
+        CASE WHEN q.status IS NULL OR LENGTH(TRIM(q.status)) = 0 THEN '[]' ELSE json_array(LOWER(TRIM(q.status))) END,
+        COALESCE(q.updated_at, q.created_at, datetime('now')),
+        LOWER(COALESCE(NULLIF(TRIM(q.number), ''), 'Devis ' || q.id)),
+        LOWER(TRIM(COALESCE(c.name, '') || ' ' || COALESCE(q.status, '') || ' ' || COALESCE(q.issue_date, ''))),
+        LOWER(CASE WHEN q.status IS NULL OR LENGTH(TRIM(q.status)) = 0 THEN '[]' ELSE json_array(LOWER(TRIM(q.status))) END)
+      FROM ${BILLING_QUOTES_TABLE} q
+      LEFT JOIN ${BILLING_CLIENTS_TABLE} c ON c.id = q.client_id
+      WHERE q.deleted_at IS NULL;
+    `);
+  }
+
+  if (await tableExists(db, BILLING_INVOICES_TABLE)) {
+    await db.execAsync(`
+      INSERT OR REPLACE INTO ${SEARCH_INDEX_TABLE}
+      (
+        id, org_id, entity, entity_id, project_id,
+        title, body, tags_json, updated_at,
+        title_norm, body_norm, tags_norm
+      )
+      SELECT
+        'BILLING_INVOICE:' || i.id,
+        i.org_id,
+        'BILLING_INVOICE',
+        i.id,
+        NULL,
+        COALESCE(NULLIF(TRIM(i.number), ''), 'Facture ' || i.id),
+        TRIM(COALESCE(c.name, '') || ' ' || COALESCE(i.status, '') || ' ' || COALESCE(i.issue_date, '') || ' ' || COALESCE(i.due_date, '')),
+        CASE WHEN i.status IS NULL OR LENGTH(TRIM(i.status)) = 0 THEN '[]' ELSE json_array(LOWER(TRIM(i.status))) END,
+        COALESCE(i.updated_at, i.created_at, datetime('now')),
+        LOWER(COALESCE(NULLIF(TRIM(i.number), ''), 'Facture ' || i.id)),
+        LOWER(TRIM(COALESCE(c.name, '') || ' ' || COALESCE(i.status, '') || ' ' || COALESCE(i.issue_date, '') || ' ' || COALESCE(i.due_date, ''))),
+        LOWER(CASE WHEN i.status IS NULL OR LENGTH(TRIM(i.status)) = 0 THEN '[]' ELSE json_array(LOWER(TRIM(i.status))) END)
+      FROM ${BILLING_INVOICES_TABLE} i
+      LEFT JOIN ${BILLING_CLIENTS_TABLE} c ON c.id = i.client_id
+      WHERE i.deleted_at IS NULL;
+    `);
+  }
+
   const countRow = await db.getFirstAsync<CountRow>(`SELECT COUNT(*) AS count FROM ${SEARCH_INDEX_TABLE}`);
   return countRow?.count ?? 0;
 }
@@ -943,6 +1402,9 @@ function entityTable(entity: SearchEntity) {
   if (entity === 'TASK') return TASKS_TABLE;
   if (entity === 'DOCUMENT') return DOCUMENTS_TABLE;
   if (entity === 'MEDIA') return MEDIA_TABLE;
+  if (entity === 'BILLING_CLIENT') return BILLING_CLIENTS_TABLE;
+  if (entity === 'BILLING_QUOTE') return BILLING_QUOTES_TABLE;
+  if (entity === 'BILLING_INVOICE') return BILLING_INVOICES_TABLE;
   return EXPORTS_TABLE;
 }
 
@@ -1286,6 +1748,81 @@ export const search: SearchApi = {
 
       if (row) {
         entry = mapExportRowToEntry(row);
+      }
+    }
+
+    if (entity === 'BILLING_CLIENT') {
+      const row = await db.getFirstAsync<BillingClientRow>(
+        `
+          SELECT id, org_id, name, email, phone, vat_number, updated_at, created_at, deleted_at
+          FROM ${BILLING_CLIENTS_TABLE}
+          WHERE id = ?
+          LIMIT 1
+        `,
+        cleanId
+      );
+
+      if (row) {
+        entry = mapBillingClientRowToEntry(row);
+      }
+    }
+
+    if (entity === 'BILLING_QUOTE') {
+      const row = await db.getFirstAsync<BillingQuoteRow>(
+        `
+          SELECT
+            q.id,
+            q.org_id,
+            q.client_id,
+            c.name AS client_name,
+            q.number,
+            q.status,
+            q.issue_date,
+            q.valid_until,
+            q.total,
+            q.updated_at,
+            q.created_at,
+            q.deleted_at
+          FROM ${BILLING_QUOTES_TABLE} q
+          LEFT JOIN ${BILLING_CLIENTS_TABLE} c ON c.id = q.client_id
+          WHERE q.id = ?
+          LIMIT 1
+        `,
+        cleanId
+      );
+
+      if (row) {
+        entry = mapBillingQuoteRowToEntry(row);
+      }
+    }
+
+    if (entity === 'BILLING_INVOICE') {
+      const row = await db.getFirstAsync<BillingInvoiceRow>(
+        `
+          SELECT
+            i.id,
+            i.org_id,
+            i.client_id,
+            c.name AS client_name,
+            i.number,
+            i.status,
+            i.issue_date,
+            i.due_date,
+            i.total,
+            i.paid_total,
+            i.updated_at,
+            i.created_at,
+            i.deleted_at
+          FROM ${BILLING_INVOICES_TABLE} i
+          LEFT JOIN ${BILLING_CLIENTS_TABLE} c ON c.id = i.client_id
+          WHERE i.id = ?
+          LIMIT 1
+        `,
+        cleanId
+      );
+
+      if (row) {
+        entry = mapBillingInvoiceRowToEntry(row);
       }
     }
 

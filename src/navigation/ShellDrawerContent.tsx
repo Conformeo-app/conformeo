@@ -1,25 +1,17 @@
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
-import React, { useMemo } from 'react';
+import React from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { useAuth } from '../core/auth';
 import { flags } from '../data/feature-flags';
 import { useSyncStatus } from '../data/sync/useSyncStatus';
 import { useEnabledModules } from './EnabledModulesProvider';
 import { Badge } from '../ui/components/Badge';
+import { Icon } from '../ui/components/Icon';
 import { Text } from '../ui/components/Text';
 import { useTheme } from '../ui/theme/ThemeProvider';
+import { setCurrentContext } from './contextStore';
+import { DRAWER_ENTRIES } from './registry';
 import { ROUTES } from './routes';
-
-const LABELS: Record<string, { label: string; hint: string }> = {
-  [ROUTES.DASHBOARD]: { label: 'Tableau de bord', hint: 'Synthèse chantier / entreprise' },
-  [ROUTES.PROJECTS]: { label: 'Chantiers', hint: 'Liste + détail + onglets' },
-  [ROUTES.EQUIPMENT]: { label: 'Équipements', hint: 'Matériel, mouvements, liaisons' },
-  [ROUTES.PLANNING]: { label: 'Planning', hint: 'Calendrier + affectations' },
-  [ROUTES.TEAM]: { label: 'Équipe', hint: 'Membres & équipes' },
-  [ROUTES.SECURITY]: { label: 'Sécurité', hint: 'MFA, sessions, audit, synchronisation' },
-  [ROUTES.ENTERPRISE]: { label: 'Entreprise', hint: 'Paramètres, modules, offres' },
-  [ROUTES.ACCOUNT]: { label: 'Compte', hint: 'Profil & déconnexion' }
-};
 
 function phaseLabel(phase: 'idle' | 'syncing' | 'offline' | 'error') {
   if (phase === 'syncing') return 'En cours';
@@ -39,60 +31,10 @@ export function ShellDrawerContent(props: DrawerContentComponentProps) {
   const galleryEnabled =
     __DEV__ || (role === 'ADMIN' && flags.isEnabled('ui_gallery', { orgId: activeOrgId ?? undefined, fallback: false }));
 
-  const routeVisible = useMemo(() => {
-    const hasSecurity =
-      galleryEnabled ||
-      availableModules.includes('security') ||
-      availableModules.includes('search') ||
-      availableModules.includes('offline') ||
-      availableModules.includes('audit') ||
-      availableModules.includes('conflicts') ||
-      availableModules.includes('superadmin');
-
-    const hasEnterprise =
-      availableModules.includes('orgs') ||
-      availableModules.includes('company') ||
-      availableModules.includes('offers') ||
-      availableModules.includes('governance') ||
-      availableModules.includes('backup');
-
-    const enabled = new Map<string, boolean>([
-      [ROUTES.DASHBOARD, true],
-      [ROUTES.PROJECTS, true], // section "core"
-      [ROUTES.EQUIPMENT, availableModules.includes('equipment')],
-      [ROUTES.PLANNING, availableModules.includes('planning')],
-      [ROUTES.TEAM, availableModules.includes('orgs')],
-      [ROUTES.SECURITY, hasSecurity],
-      [ROUTES.ENTERPRISE, hasEnterprise],
-      [ROUTES.ACCOUNT, true]
-    ]);
-
-    return (name: string) => enabled.get(name) === true;
-  }, [availableModules, galleryEnabled]);
-
-  const routes = useMemo(
-    () =>
-      props.state.routes
-        .map((route) => route.name)
-        .filter((name) => LABELS[name])
-        .filter((name) => routeVisible(name))
-        .filter((name) => name !== ROUTES.ACCOUNT),
-    [props.state.routes, routeVisible]
-  );
-
-  if (__DEV__) {
-    for (const routeName of routes) {
-      if (!LABELS[routeName]) {
-        // eslint-disable-next-line no-console
-        console.warn(`[drawer] Route sans label: ${routeName}`);
-      }
-    }
-  }
-
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface, borderRightWidth: 1, borderColor: colors.border }}>
       <View style={{ padding: spacing.lg, borderBottomWidth: 1, borderColor: colors.border }}>
-        <Text variant="h1">Conformeo</Text>
+        <Text variant="h1">Conforméo</Text>
         <Text variant="caption" style={{ color: colors.textSecondary, marginTop: spacing.xs }} numberOfLines={1}>
           {user?.email ?? '—'} · {role ?? '—'}
         </Text>
@@ -110,15 +52,20 @@ export function ShellDrawerContent(props: DrawerContentComponentProps) {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm }}>
-        {routes.map((name) => {
-          const meta = LABELS[name] ?? { label: name, hint: '' };
-          const isActive = name === activeRouteName;
+        {DRAWER_ENTRIES.map((entry) => {
+          const isActive = entry.route === activeRouteName;
+          const enabled = entry.isEnabled(availableModules, { galleryEnabled });
 
           return (
             <Pressable
-              key={name}
+              key={entry.route}
               onPress={() => {
-                props.navigation.navigate(name as never);
+                if (entry.route === ROUTES.PROJECTS) {
+                  setCurrentContext({ projectId: undefined });
+                  (props.navigation as any).navigate(ROUTES.PROJECTS, { screen: 'ProjectsList' });
+                } else {
+                  props.navigation.navigate(entry.route as never);
+                }
                 props.navigation.closeDrawer();
               }}
               style={{
@@ -128,41 +75,27 @@ export function ShellDrawerContent(props: DrawerContentComponentProps) {
                 backgroundColor: isActive ? colors.primarySoft : 'transparent'
               }}
             >
-              <Text variant="bodyStrong" style={{ color: isActive ? colors.text : colors.textSecondary }}>
-                {meta.label}
-              </Text>
-              <Text variant="caption" style={{ color: colors.textSecondary, opacity: 0.85 }}>
-                {meta.hint}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                <Icon name={entry.icon} muted={!enabled && !isActive} />
+
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text variant="bodyStrong" style={{ color: isActive ? colors.text : colors.textSecondary }} numberOfLines={1}>
+                    {entry.label}
+                  </Text>
+                  <Text variant="caption" style={{ color: colors.textSecondary, opacity: 0.85 }} numberOfLines={2}>
+                    {entry.hint}
+                  </Text>
+                  {!enabled ? (
+                    <View style={{ marginTop: spacing.xs }}>
+                      <Badge tone="warning" label="Désactivé" icon="lock-outline" />
+                    </View>
+                  ) : null}
+                </View>
+              </View>
             </Pressable>
           );
         })}
       </ScrollView>
-
-      <View style={{ padding: spacing.lg, borderTopWidth: 1, borderColor: colors.border }}>
-        <Pressable
-          onPress={() => {
-            props.navigation.navigate(ROUTES.ACCOUNT as never);
-            props.navigation.closeDrawer();
-          }}
-          style={{
-            paddingVertical: spacing.sm,
-            paddingHorizontal: spacing.md,
-            borderRadius: radii.md,
-            backgroundColor: activeRouteName === ROUTES.ACCOUNT ? colors.primarySoft : 'transparent'
-          }}
-        >
-          <Text
-            variant="bodyStrong"
-            style={{ color: activeRouteName === ROUTES.ACCOUNT ? colors.text : colors.textSecondary }}
-          >
-            {LABELS[ROUTES.ACCOUNT].label}
-          </Text>
-          <Text variant="caption" style={{ color: colors.textSecondary, opacity: 0.85 }}>
-            {LABELS[ROUTES.ACCOUNT].hint}
-          </Text>
-        </Pressable>
-      </View>
     </View>
   );
 }

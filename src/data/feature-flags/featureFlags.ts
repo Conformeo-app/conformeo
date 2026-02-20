@@ -19,6 +19,7 @@ const ORGS_ADMIN_CACHE_TABLE = 'orgs_admin_cache';
 
 const MODULE_KEY_SET = new Set<ModuleKey>(appModules.map((item) => item.key));
 const ADMIN_ROLES = new Set(['owner', 'admin']);
+const DEFAULT_DISABLED_MODULE_KEYS = new Set<ModuleKey>(['billing']);
 
 const DEFAULT_AUDIT_LIMIT = 30;
 const MAX_AUDIT_LIMIT = 200;
@@ -127,7 +128,11 @@ function isModuleKey(key: string): key is ModuleKey {
 }
 
 function defaultEnabledForKey(key: string) {
-  return isModuleKey(key);
+  if (!isModuleKey(key)) {
+    return false;
+  }
+
+  return !DEFAULT_DISABLED_MODULE_KEYS.has(key);
 }
 
 function isMissingColumnError(error: unknown, column: string) {
@@ -203,7 +208,7 @@ function withModuleDefaults(orgId: string, rows: FeatureFlagRecord[]) {
     if (!map.has(moduleKey)) {
       map.set(
         moduleKey,
-        toFlagRecord(orgId, moduleKey, true, {}, 'DEFAULT', undefined, undefined)
+        toFlagRecord(orgId, moduleKey, defaultEnabledForKey(moduleKey), {}, 'DEFAULT', undefined, undefined)
       );
     }
   }

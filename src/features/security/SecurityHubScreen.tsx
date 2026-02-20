@@ -7,6 +7,7 @@ import { useEnabledModules } from '../../navigation/EnabledModulesProvider';
 import type { SecurityStackParamList } from '../../navigation/types';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
+import { ReleaseBadge } from '../../ui/components/ReleaseBadge';
 import { Text } from '../../ui/components/Text';
 import { Screen } from '../../ui/layout/Screen';
 import { useTheme } from '../../ui/theme/ThemeProvider';
@@ -37,7 +38,11 @@ export function SecurityHubScreen({ navigation }: Props) {
 
   return (
     <Screen>
-      <SectionHeader title="Sécurité" subtitle="Accès aux outils de sécurité, audit et synchronisation (selon modules activés)." />
+      <SectionHeader
+        title="Sécurité & DUERP"
+        subtitle="Accès aux outils de sécurité, audit et synchronisation (selon modules activés)."
+        right={<ReleaseBadge state="BETA" />}
+      />
 
       <View style={{ gap: spacing.md }}>
         <Card>

@@ -1,6 +1,8 @@
+import { createClient } from '@supabase/supabase-js';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, TextInput, View } from 'react-native';
 import { useAuth } from '../../core/auth';
+import { appEnv } from '../../core/env';
 import { admin, AdminOrg, AdminOrgUser, AdminSelf } from '../../data/super-admin';
 import { Button } from '../../ui/components/Button';
 import { Card } from '../../ui/components/Card';
@@ -33,6 +35,13 @@ export function SuperAdminScreen() {
   const [orgUsers, setOrgUsers] = useState<AdminOrgUser[]>([]);
 
   const [reasonDraft, setReasonDraft] = useState('');
+  const [impersonation, setImpersonation] = useState<{
+    sessionId: string;
+    orgId: string;
+    targetUserId: string;
+    expiresAt: string;
+    accessToken: string;
+  } | null>(null);
 
   const selectedOrg = useMemo(() => orgs.find((o) => o.id === selectedOrgId) ?? null, [orgs, selectedOrgId]);
 
@@ -195,6 +204,89 @@ export function SuperAdminScreen() {
     [reasonDraft, selectedOrgId]
   );
 
+  const startImpersonation = useCallback(
+    async (targetUserId: string) => {
+      const orgId = selectedOrgId;
+      if (!orgId) {
+        setError('Sélectionne une organisation d’abord.');
+        return;
+      }
+
+      const reason = normalizeText(reasonDraft);
+      if (!reason) {
+        setError('Raison obligatoire pour démarrer une impersonation.');
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await admin.startImpersonation({
+          org_id: orgId,
+          target_user_id: targetUserId,
+          reason,
+          expires_in_minutes: 30
+        });
+
+        setImpersonation({
+          sessionId: res.session.id,
+          orgId,
+          targetUserId,
+          expiresAt: res.expires_at,
+          accessToken: res.access_token
+        });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Impossible de démarrer l'impersonation";
+        setError(message);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [reasonDraft, selectedOrgId]
+  );
+
+  const impersonationClient = useMemo(() => {
+    if (!impersonation) return null;
+    if (!appEnv.isSupabaseConfigured) return null;
+    return createClient(appEnv.supabaseUrl!, appEnv.supabaseAnonKey!, {
+      auth: { persistSession: false },
+      global: { headers: { Authorization: `Bearer ${impersonation.accessToken}` } }
+    });
+  }, [impersonation]);
+
+  const stopImpersonation = useCallback(async () => {
+    if (!impersonation) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await admin.stopImpersonation(impersonation.sessionId);
+      setImpersonation(null);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Impossible d'arrêter l'impersonation";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [impersonation]);
+
+  const testImpersonation = useCallback(async () => {
+    if (!impersonationClient) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const { data, error: queryError } = await impersonationClient.from('projects').select('id, name').limit(5);
+      if (queryError) {
+        throw new Error(queryError.message);
+      }
+      Alert.alert('Impersonation OK', `projects: ${(data ?? []).length}`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Test impersonation impossible';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [impersonationClient]);
+
   const headerSubtitle = useMemo(() => {
     if (!self) {
       return 'Accès restreint (super-admin).';
@@ -214,6 +306,22 @@ export function SuperAdminScreen() {
         <SectionHeader title="Super-admin" subtitle={headerSubtitle} />
 
         <View style={{ gap: spacing.md }}>
+          {impersonation ? (
+            <Card style={{ borderWidth: 1, borderColor: colors.amber }}>
+              <Text variant="h2">MODE SUPPORT (impersonation)</Text>
+              <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
+                org: {shortId(impersonation.orgId)} • user: {shortId(impersonation.targetUserId)}
+              </Text>
+              <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
+                expire le {new Date(impersonation.expiresAt).toLocaleString('fr-FR')}
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
+                <Button label="Tester accès" kind="ghost" onPress={() => void testImpersonation()} disabled={loading} />
+                <Button label="Arrêter" kind="ghost" onPress={() => void stopImpersonation()} disabled={loading} />
+              </View>
+            </Card>
+          ) : null}
+
           <Card>
             <Text variant="h2">Identité</Text>
             <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
@@ -309,6 +417,7 @@ export function SuperAdminScreen() {
                   </Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
                     <Button label="Support session" onPress={() => void startSupport(member.user_id)} disabled={loading} />
+                    <Button label="Impersonation" kind="ghost" onPress={() => void startImpersonation(member.user_id)} disabled={loading} />
                     <Button
                       label="Revoke sessions"
                       kind="ghost"

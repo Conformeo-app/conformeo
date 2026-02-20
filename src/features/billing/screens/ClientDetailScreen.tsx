@@ -1,0 +1,2 @@
+export { ClientDetailScreen } from '../ClientDetailScreen';
+
