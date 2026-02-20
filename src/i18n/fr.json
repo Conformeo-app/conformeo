@@ -69,6 +69,14 @@
     "dashboard": "Tableau de bord",
     "companyHub": "Espace entreprise",
     "offline": "Hors ligne"
+  },
+  "orgs": {
+    "rbac": {
+      "templates": {
+        "admin": "Admin (template)",
+        "manager": "Responsable (template)",
+        "field": "Terrain (template)"
+      }
+    }
   }
 }
-
