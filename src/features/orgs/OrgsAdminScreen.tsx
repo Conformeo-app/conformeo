@@ -743,10 +743,10 @@ export function OrgsAdminScreen() {
                     const active = rbacTemplateKey === key;
                     const label =
                       key === 'admin'
-                        ? t('orgs.rbac.templates.admin')
+                        ? String(t('orgs.rbac.templates.admin'))
                         : key === 'manager'
-                          ? t('orgs.rbac.templates.manager')
-                          : t('orgs.rbac.templates.field');
+                          ? String(t('orgs.rbac.templates.manager'))
+                          : String(t('orgs.rbac.templates.field'));
                     return (
                       <Pressable
                         key={key}
