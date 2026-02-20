@@ -1,16 +1,20 @@
 import { useRoute } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, TextInput, View } from 'react-native';
+import { t } from '../../i18n';
 import { useAuth } from '../../core/auth';
 import {
   ModuleFlag,
   OrganizationMember,
   OrganizationRecord,
   OrgMemberRole,
+  OrgRole,
+  OrgUserRole,
   TeamRecord,
   members,
   modules,
   org,
+  roles as orgRoles,
   teams
 } from '../../data/orgs-admin';
 import { OrgQuotas, OrgUsage, quotas } from '../../data/quotas-limits';
@@ -60,6 +64,11 @@ export function OrgsAdminScreen() {
   const [teamRows, setTeamRows] = useState<TeamRecord[]>([]);
   const [moduleRows, setModuleRows] = useState<ModuleFlag[]>([]);
   const [modulePayloadDrafts, setModulePayloadDrafts] = useState<Record<string, string>>({});
+
+  const [rbacRoleRows, setRbacRoleRows] = useState<OrgRole[]>([]);
+  const [rbacUserRoleRows, setRbacUserRoleRows] = useState<OrgUserRole[]>([]);
+  const [rbacNewRoleNameDraft, setRbacNewRoleNameDraft] = useState('');
+  const [rbacTemplateKey, setRbacTemplateKey] = useState<'manager' | 'field' | 'admin' | null>('manager');
 
   const [quotaRow, setQuotaRow] = useState<OrgQuotas | null>(null);
   const [usageRow, setUsageRow] = useState<OrgUsage | null>(null);
@@ -133,6 +142,16 @@ export function OrgsAdminScreen() {
     setTeamRows(data);
   }, []);
 
+  const refreshRbacRoles = useCallback(async () => {
+    const data = await orgRoles.list();
+    setRbacRoleRows(data);
+  }, []);
+
+  const refreshRbacUserRoles = useCallback(async () => {
+    const data = await orgRoles.listUserRoles();
+    setRbacUserRoleRows(data);
+  }, []);
+
   const refreshModules = useCallback(async () => {
     const data = await modules.listEnabled();
     setModuleRows(data);
@@ -146,8 +165,16 @@ export function OrgsAdminScreen() {
   }, []);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([refreshOrganization(), refreshMembers(), refreshTeams(), refreshModules(), refreshQuotas()]);
-  }, [refreshMembers, refreshModules, refreshOrganization, refreshTeams, refreshQuotas]);
+    await Promise.all([
+      refreshOrganization(),
+      refreshMembers(),
+      refreshTeams(),
+      refreshModules(),
+      refreshQuotas(),
+      refreshRbacRoles(),
+      refreshRbacUserRoles()
+    ]);
+  }, [refreshMembers, refreshModules, refreshOrganization, refreshTeams, refreshQuotas, refreshRbacRoles, refreshRbacUserRoles]);
 
   useEffect(() => {
     let cancelled = false;
@@ -204,6 +231,29 @@ export function OrgsAdminScreen() {
     [memberRows]
   );
 
+  const rbacRoleByKey = useMemo(() => {
+    const map = new Map<string, OrgRole>();
+    for (const item of rbacRoleRows) {
+      map.set(item.key, item);
+    }
+    return map;
+  }, [rbacRoleRows]);
+
+  const rbacTemplateRoleId = useMemo(() => {
+    if (!rbacTemplateKey) {
+      return null;
+    }
+    return rbacRoleByKey.get(rbacTemplateKey)?.id ?? null;
+  }, [rbacRoleByKey, rbacTemplateKey]);
+
+  const rbacUserRoleByUserId = useMemo(() => {
+    const map = new Map<string, OrgUserRole>();
+    for (const item of rbacUserRoleRows) {
+      map.set(item.user_id, item);
+    }
+    return map;
+  }, [rbacUserRoleRows]);
+
   const saveOrgSettings = async () => {
     if (!organization) {
       return;
@@ -258,6 +308,58 @@ export function OrgsAdminScreen() {
       await refreshTeams();
       setInfo('Équipe créée.');
     });
+  };
+
+  const createRbacRole = async () => {
+    await withBusy(async () => {
+      const roleId = await orgRoles.create({
+        name: rbacNewRoleNameDraft,
+        basedOnRoleId: rbacTemplateRoleId
+      });
+      setRbacNewRoleNameDraft('');
+      await refreshRbacRoles();
+      setInfo(`Rôle créé: ${roleId}`);
+    });
+  };
+
+  const assignRbacRole = (userId: string) => {
+    if (!isAdmin) {
+      setError('Accès refusé: admin requis.');
+      return;
+    }
+
+    const available = rbacRoleRows.slice(0, 12);
+    if (available.length === 0) {
+      setError('Aucun rôle disponible (RBAC).');
+      return;
+    }
+
+    const actions = [
+      ...available.map((roleItem) => ({
+        text: roleItem.is_system ? `${roleItem.name} (système)` : roleItem.name,
+        onPress: () => {
+          void withBusy(async () => {
+            await orgRoles.assignUser({ userId, roleId: roleItem.id });
+            await refreshRbacUserRoles();
+            setInfo('Rôle permissions mis à jour.');
+          });
+        }
+      })),
+      {
+        text: 'Réinitialiser (par défaut)',
+        style: 'destructive' as const,
+        onPress: () => {
+          void withBusy(async () => {
+            await orgRoles.clearUserRole(userId);
+            await refreshRbacUserRoles();
+            setInfo('Rôle permissions réinitialisé.');
+          });
+        }
+      },
+      { text: 'Annuler', style: 'cancel' as const }
+    ];
+
+    Alert.alert('Rôle (permissions)', 'Choisir un rôle pour ce membre.', actions);
   };
 
   const addTeamMember = async (teamId: string, userId: string) => {
@@ -613,6 +715,107 @@ export function OrgsAdminScreen() {
                 ))
               )}
             </View>
+          </Card>
+
+          <Card>
+            <Text variant="h2">Rôles & accès (RBAC)</Text>
+            <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
+              Rôles applicatifs (permissions) : système + personnalisables, assignables aux membres.
+            </Text>
+
+            {!isAdmin ? (
+              <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.sm }}>
+                Accès réservé aux administrateurs de l’organisation.
+              </Text>
+            ) : (
+              <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
+                <TextInput
+                  value={rbacNewRoleNameDraft}
+                  onChangeText={setRbacNewRoleNameDraft}
+                  placeholder="Nouveau rôle (ex: Conducteur travaux)"
+                  placeholderTextColor={colors.slate}
+                  style={inputStyle}
+                  editable={isAdmin}
+                />
+
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+                  {(['admin', 'manager', 'field'] as const).map((key) => {
+                    const active = rbacTemplateKey === key;
+                    const label =
+                      key === 'admin'
+                        ? String(t('orgs.rbac.templates.admin'))
+                        : key === 'manager'
+                          ? String(t('orgs.rbac.templates.manager'))
+                          : String(t('orgs.rbac.templates.field'));
+                    return (
+                      <Pressable
+                        key={key}
+                        onPress={() => setRbacTemplateKey(key)}
+                        style={{
+                          borderRadius: radii.pill,
+                          paddingHorizontal: spacing.md,
+                          paddingVertical: spacing.xs,
+                          backgroundColor: active ? colors.mint : colors.white,
+                          borderWidth: 1,
+                          borderColor: active ? 'transparent' : colors.fog
+                        }}
+                      >
+                        <Text variant="caption" style={{ color: active ? colors.ink : colors.slate }}>
+                          {label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <Button
+                  label="Créer un rôle"
+                  kind="ghost"
+                  onPress={() => void createRbacRole()}
+                  disabled={busy || rbacNewRoleNameDraft.trim().length < 2}
+                />
+
+                <View style={{ gap: spacing.xs }}>
+                  <Text variant="caption" style={{ color: colors.slate }}>
+                    Rôles disponibles ({rbacRoleRows.length})
+                  </Text>
+                  {rbacRoleRows.slice(0, 12).map((item) => (
+                    <Text key={item.id} variant="caption" style={{ color: colors.slate }}>
+                      • {item.name} {item.is_system ? '(système)' : ''} — key: {item.key}
+                    </Text>
+                  ))}
+                </View>
+
+                <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+                  <Text variant="caption" style={{ color: colors.slate }}>
+                    Affectation aux membres
+                  </Text>
+                  {activeMembers.length === 0 ? (
+                    <Text variant="caption" style={{ color: colors.slate }}>
+                      Aucun membre actif.
+                    </Text>
+                  ) : (
+                    activeMembers.map((member) => {
+                      const userId = member.user_id!;
+                      const assigned = rbacUserRoleByUserId.get(userId)?.role ?? null;
+                      const label = assigned ? assigned.name : `Défaut (${ROLE_LABEL[member.role]})`;
+
+                      return (
+                        <Card key={`rbac-user-${userId}`}>
+                          <Text variant="bodyStrong">{member.email ?? userId}</Text>
+                          <Text variant="caption" style={{ color: colors.slate, marginTop: spacing.xs }}>
+                            Rôle permissions: {label}
+                          </Text>
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm }}>
+                            <Button label="Changer" kind="ghost" onPress={() => assignRbacRole(userId)} disabled={busy} />
+                          </View>
+                        </Card>
+                      );
+                    })
+                  )}
+                </View>
+              </View>
+            )}
           </Card>
 
           <Card>
